@@ -51,21 +51,44 @@ as a default.
 # ///
 
 from __future__ import annotations
-
 from pathlib import Path
-from plumbum import local
-from plumbum.cmd import tofu
+from typing import Optional, Annotated
+
+import cyclopts
+from cyclopts import App, Parameter
+from plumbum import local, FG
+from plumbum.cmd import git
+
+app = App(config=cyclopts.config.Env("INPUT_", command=False))
 
 
-def main() -> None:
+@app.default
+def main(
+    *,
+    bin_name: Annotated[str, Parameter(required=True)],
+    version: Annotated[str, Parameter(required=True)],
+    formats: list[str] | None = None,
+    outdir: Optional[Path] = None,
+    dry_run: bool = False,
+):
     project_root = Path(__file__).resolve().parents[1]
-    cluster_dir = project_root / "infra" / "clusters" / "dev"
-    with local.cwd(cluster_dir):
-        tofu["plan"]()
+    dist = (outdir or (project_root / "dist")) / bin_name
+    dist.mkdir(parents=True, exist_ok=True)
+
+    if not dry_run:
+        with local.cwd(project_root):
+            (git["tag", f"v{version}"] & FG)
+
+    print({
+        "bin_name": bin_name,
+        "version": version,
+        "formats": formats or [],
+        "dist": str(dist),
+    })
 
 
 if __name__ == "__main__":
-    main()
+    app()
 ```
 
 ### Cyclopts CLI pattern (environment‑first)
@@ -81,14 +104,45 @@ Employ Cyclopts when a script requires parameters, particularly under CI with
 # ///
 
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional, Annotated
 
 import cyclopts
 from cyclopts import App, Parameter
-from plumbum import local
-from plumbum.cmd import tofu
+from plumbum import local, FG
+from plumbum.cmd import git
+
+app = App(config=cyclopts.config.Env("INPUT_", command=False))
+
+
+@app.default
+def main(
+    *,
+    bin_name: Annotated[str, Parameter(required=True)],
+    version: Annotated[str, Parameter(required=True)],
+    formats: list[str] | None = None,
+    outdir: Optional[Path] = None,
+    dry_run: bool = False,
+):
+    project_root = Path(__file__).resolve().parents[1]
+    dist = (outdir or (project_root / "dist")) / bin_name
+    dist.mkdir(parents=True, exist_ok=True)
+
+    if not dry_run:
+        with local.cwd(project_root):
+            (git["tag", f"v{version}"] & FG)
+
+    print({
+        "bin_name": bin_name,
+        "version": version,
+        "formats": formats or [],
+        "dist": str(dist),
+    })
+
+
+if __name__ == "__main__":
+    app()
+```
 
 # Map INPUT_<PARAM> → function parameter without additional glue
 app = App(config=cyclopts.config.Env("INPUT_", command=False))
