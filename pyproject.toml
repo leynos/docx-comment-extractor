@@ -1,12 +1,18 @@
 [project]
 name = "docx-comment-extractor"
 version = "0.1.0"
-description = "docx-comment-extractor package"
+description = "Extract Word comments into inline CriticMarkup Markdown"
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "ISC" }
-dependencies = []
+dependencies = [
+    "cyclopts",
+    "python-docx",
+    "rich",
+]
 
+[project.scripts]
+docx-comment-extractor = "docx_comment_extractor.cli:main"
 [dependency-groups]
 dev = [
     "pytest",
@@ -14,11 +20,14 @@ dev = [
     "pyright",
     "pytest-timeout",
     "pytest-xdist",
+    "pytest-bdd",
+    "syrupy",
 ]
 
 [tool.ruff]
 line-length = 88
 preview = true
+extend-exclude = ["scripts"]
 # The estate spelling helper has its own Python 3.13 Ruff gate in the Makefile.
 extend-exclude = ["scripts"]
 
