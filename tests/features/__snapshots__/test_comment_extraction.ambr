@@ -1,0 +1,31 @@
+# serializer version: 1
+# name: test_extract_commented_content_to_standard_output[cross-paragraph-comment-cross_paragraph_comment_stdout][cross_paragraph_comment_stdout]
+  '''
+  The first paragraph opens {==a long comment
+  
+  that closes here==}{>>Jordan, 2026-04-09T20:35:31Z: This crosses a paragraph boundary. / Second note paragraph.<<} with more context.
+  
+  '''
+# ---
+# name: test_extract_commented_content_to_standard_output[multi-run-comment-multi_run_comment_stdout][multi_run_comment_stdout]
+  '''
+  Please review {==this multi-run span==}{>>Alex Reviewer, 2026-04-09T20:35:31Z: Tighten this wording.<<} now.
+  
+  '''
+# ---
+# name: test_extract_commented_content_to_standard_output[simple-comment-simple_comment_stdout][simple_comment_stdout]
+  '''
+  # Sample heading
+  
+  Before {==commented text==}{>>Sam C, 2026-04-09T20:35:31Z: Needs evidence.<<} after.
+  
+  '''
+# ---
+# name: test_write_extracted_markdown_to_an_output_file[simple_comment_output_file]
+  '''
+  # Sample heading
+  
+  Before {==commented text==}{>>Sam C, 2026-04-09T20:35:31Z: Needs evidence.<<} after.
+  
+  '''
+# ---
