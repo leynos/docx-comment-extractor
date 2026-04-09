@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections
 `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
 proceeds.
 
-Status: DRAFT
+Status: COMPLETE
 
 ## Purpose / big picture
 
@@ -72,7 +72,8 @@ for the provided sample file.
   `make nixie`.
 - Keep Markdown and prose in en-GB Oxford style and wrap paragraphs at
   80 columns.
-- Do not begin implementation until the user explicitly approves this plan.
+- The user approved implementation on 2026-04-09. Keep this document updated
+  as milestones land.
 
 ## Tolerances (exception triggers)
 
@@ -376,11 +377,34 @@ the user explicitly approves the plan or requests edits to it.
   confirmed that comment anchors use OOXML range markers and that 46 comments
   span multiple paragraphs.
 - [x] 2026-04-09T20:35:31+01:00: Drafted the initial ExecPlan.
-- [ ] Await user approval or requested edits.
-- [ ] Implement Milestone 1.
-- [ ] Implement Milestone 2.
-- [ ] Implement Milestone 3.
-- [ ] Implement Milestone 4.
+- [x] 2026-04-09T21:34:00+01:00: User approved implementation and requested
+  users' guide updates, comprehensive unit and behavioural coverage, and
+  snapshot or golden tests using `syrupy`.
+- [x] 2026-04-09T21:52:00+01:00: Added runtime dependencies
+  `python-docx`, `cyclopts`, and `rich`, plus `pytest-bdd` and `syrupy` for
+  test coverage and golden snapshots.
+- [x] 2026-04-09T21:53:00+01:00: Established the red phase. The new unit and
+  behavioural tests failed during collection because
+  `docx_comment_extractor.extractor` and `docx_comment_extractor.renderer` did
+  not exist yet.
+- [x] 2026-04-09T22:05:00+01:00: Implemented the internal document model,
+  extractor, Markdown renderer, and CLI.
+- [x] 2026-04-09T22:07:00+01:00: Added `pytest-bdd` CLI scenarios and seven
+  committed `syrupy` snapshots covering synthetic fixtures and the supplied
+  sample document excerpt.
+- [x] Implement Milestone 1.
+- [x] Implement Milestone 2.
+- [x] Implement Milestone 3.
+- [x] 2026-04-09T22:14:00+01:00: Smoke-tested the provided sample document and
+  generated `/tmp/pentagon-comments.md` with 247 highlights, 247 inline
+  comments, and no warnings on standard error.
+- [x] Updated `README.md`, `docs/users-guide.md`, and
+  `docs/comment-extraction-design.md` with the implemented CLI contract,
+  limitations, and smoke-test findings.
+- [x] Implement Milestone 4.
+- [x] 2026-04-09T22:31:00+01:00: Replayed `make fmt`,
+  `make markdownlint`, `make nixie`, `make check-fmt`, `make lint`,
+  `make typecheck`, and `make test` successfully.
 
 ## Surprises & Discoveries
 
@@ -392,6 +416,24 @@ the user explicitly approves the plan or requests edits to it.
   XML.
 - 2026-04-09T20:35:31+01:00: The current repository has no tests, CLI surface,
   or design docs yet, so the first milestone must establish all three.
+- 2026-04-09T21:20:00+01:00: The supplied sample document does not contain
+  nested or overlapping comment ranges. The maximum observed active depth is
+  one, which lowers the first-cut rendering risk.
+- 2026-04-09T22:01:00+01:00: Synthetic `.docx` fixtures inherit the current
+  timestamp when `Document.add_comment(...)` is used. Snapshot tests were
+  unstable until the helper forced a deterministic `w:date` attribute on each
+  synthetic comment.
+- 2026-04-09T22:04:00+01:00: `python-docx` inserts an extra run containing a
+  `commentReference` marker after each `commentRangeEnd`. It contributes no
+  visible text, so the extractor must ignore zero-text runs rather than
+  treating them as content fragments.
+- 2026-04-09T22:14:00+01:00: The supplied sample document rendered cleanly
+  without warnings, which confirms that the first release's paragraph and
+  heading support is enough for the initial acceptance target.
+- 2026-04-09T22:26:00+01:00: `cyclopts` resolves command annotations via
+  `typing.get_type_hints()` when the decorated command is registered. `Path`
+  therefore needed to remain a real runtime import in `cli.py`, even though
+  most other files could move type-only imports behind `TYPE_CHECKING`.
 
 ## Decision Log
 
@@ -407,7 +449,36 @@ the user explicitly approves the plan or requests edits to it.
 - 2026-04-09T20:35:31+01:00: Keep the initial CLI to one command with optional
   file output. A broader command surface would add design risk without helping
   the primary use case.
+- 2026-04-09T21:34:00+01:00: Treat `syrupy` snapshots as the primary golden
+  mechanism. Use them for rendered Markdown regressions while keeping
+  behavioural assertions focused on CLI contract and error handling.
+- 2026-04-09T22:00:00+01:00: Represent comment ranges using fragment-local
+  start and end comment identifier tuples instead of pre-rendered inline
+  strings. This keeps extraction and rendering separate while still handling
+  cross-paragraph spans deterministically.
+- 2026-04-09T22:01:00+01:00: Pin synthetic comment timestamps in the test
+  fixture builder. Stable golden tests matter more than mirroring live-clock
+  metadata in generated fixtures.
+- 2026-04-09T22:14:00+01:00: Keep the sample smoke result in the design and
+  user documentation, not only in the test suite. This gives future readers a
+  concrete reference output and acceptance baseline.
+- 2026-04-09T22:26:00+01:00: Keep `Path` as a runtime import in the CLI module
+  and suppress the corresponding Ruff `TC003` warning narrowly. This is a real
+  `cyclopts` runtime requirement rather than dead import noise.
 
 ## Outcomes & Retrospective
 
-Not started. Update this section after implementation and gate replay complete.
+The first release is complete. The tool now provides a single
+`docx-comment-extractor INPUT.docx [--output OUTPUT.md]` command backed by
+`cyclopts`, `python-docx`, and `rich`. It preserves paragraph and heading
+order, reconstructs Word comment ranges from OOXML markers, renders inline
+CriticMarkup comments, warns on unsupported top-level tables, and documents the
+delivered behaviour in the README, users' guide, and design note.
+
+The most useful implementation lessons were:
+
+- comment bodies and comment anchors live on different abstraction levels in
+  `python-docx`, so a hybrid model is the right boundary,
+- deterministic test fixtures require pinned comment timestamps, and
+- `cyclopts` performs real runtime annotation resolution, which makes some
+  imports operational rather than type-only.

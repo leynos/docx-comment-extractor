@@ -1,0 +1,55 @@
+# serializer version: 1
+# name: test_render_document_snapshot_for_criticmarkup_literals
+  '{==Literal \\{==marker==\\} text==}{>>Escaper, 2026-04-09T20:35:31Z: Avoid \\{>>raw<<\\} delimiters.<<}'
+# ---
+# name: test_render_document_snapshot_for_cross_paragraph_comment
+  '''
+  The first paragraph opens {==a long comment
+  
+  that closes here==}{>>Jordan, 2026-04-09T20:35:31Z: This crosses a paragraph boundary. / Second note paragraph.<<} with more context.
+  '''
+# ---
+# name: test_render_sample_document_excerpt_snapshot
+  '''
+  # Pentagon
+  
+  by Drew Fallon
+  
+  ## Moscow, November 2002
+  
+  ### Chapter 1: Night Market Dreams
+  
+  Ещё один чёртов ледяной дождь!
+  
+  Ice-needled rain stabbed through Azamat's counterfeit Nike windbreaker. He tugged the thin fabric closer, bitter regret rising at skimping on proper Moscow winter gear. Against his chest, his phone vibrated—a message about Sinclair parts surfacing in bulk. He jabbed at the shortcut key, hands unsteady. Genuine components could mean tripling his investment within days. The past five years in Moscow's electronics underground had refined his eye—with just a glance he could distinguish authentic Japanese capacitors from the Chinese copies that flooded Gorbushka Market after each customs “inspection”.
+  
+  The neon signs above painted the wet pavement in shifting patterns of red and blue, {==their Cyrillic promises of authentic Western electronics bleeding into the puddles. ==}{>>Sam Chapman, 2025-11-25T13:23:02Z: I like this sentence here, it establishes this post soviet setting, and the promises of the western goods of capitalism. I feel like it says a lot in just this short segment<<}The leather messenger bag pressed against his ribs, its false bottom concealing components worth more money than he’d seen in a year before arriving in Moscow. Checking the notebook in his pocket—an old university habit before major deals—he steadied himself.
+  
+  Between the stalls, genuine {==Toshiba laptop==}{>>Sam Chapman, 2025-11-25T13:24:27Z: I like the presence of specific brands throughout these opening passages, it sets a tone of this capitalist brand world<<}s gleamed behind reinforced glass, their dollar prices marking them as dreams for most Muscovites. But three metres away—Azamat's breath caught—a vendor displayed circuit boards stripped from decommissioned military equipment. He {==yearned to trace the Soviet-era date stamps on the green fibreglass.==}{>>Sam Chapman, 2025-11-25T13:27:02Z: I like how this establishes a more nerdy element of his character, perhaps a general interest in the Soviet Union<<} Those components, built to withstand nuclear war, would outlast any modern Chinese import.
+  
+  {==A weak neon sign sputtered overhead, and the salvaged boards seemed to pulse with possibility.==}{>>Sam Chapman, 2025-11-25T13:29:31Z: Is this too similar to the sentence a few paragraphs back about the neon signs, especially as the previous one states having a promise of western goods. I wonder if you could combine these into one paragraph instead of splitting them up?<<} Each one told a story: of military bunkers, of engineers who overbuilt everything, of secrets waiting to be repurposed. The phone buzzed again. Another supplier. The world narrowed to his cargo and the promise of rare parts waiting to be discovered.
+  
+  Two men in charcoal suits caught his attention, snapping him alert. Not just another shakedown—these ones moved with purpose. In the wake of Nord-Ost, every exposed circuit board looked like ordnance to someone. FSB warnings about “dual-use” parts did the rest.
+  
+  Their calculated positioning commanded both the main thoroughfare and side passages, making his stomach clench. His rehearsed Moscow accent stuck in his throat.
+  
+  Veering into a narrow alley, he passed bootleg mobile phones gleaming beneath plastic tarps. The scent of electronics and wet cardboard filled the air, {==reminding him of his uncle's shipping warehouse in Shenzhen. ==}{>>Sam Chapman, 2025-11-25T13:33:20Z: I like that you bring in the detail of the uncle here. It makes his life seem more like a real person , as you bring in a personal connection through the vivid sensory description.<<}From a nearby stall, voices drifted through the makeshift walls—vendors exchanging the kind of whispered intelligence that kept businesses afloat or buried them overnight.
+  
+  “…Word is the Trade Ministry's cracking down again—too many foreign complaints. Some American lawyer screamed about trademark violations on Channel One last week…”
+  
+  His stride faltered as the implications formed in his mind{==: another sweep, another round of "inspections" that could gut half the market's inventory within days.==}{>>Sam Chapman, 2025-11-27T10:56:49Z: I like how this sets up the current atmosphere at the moment: this level of disruption and chaos.<<}
+  
+  Each step jostled the messenger bag at his hip, {==its contents a constant reminder==}{>>Sam Chapman, 2025-11-27T10:58:24Z: I don't think you need this clause. What does 'its contents a constant reminder' actually get across? Every set jostled the messenger bag at his hip works well by itself and because you're highlighting the messenger bag to us, we as readers find that a reminder.<<}. Though another supplier message lit up his phone screen, he maintained an unhurried pace while his mind raced with calculations of unrealized profit.
+  
+  A cramped stall appeared ahead, where an elderly woman sat surrounded by bins of electronic components. Her weathered hands sorted through capacitors with the swift exactitude that marked a true specialist. Azamat readied himself, already calculating lucky numbers for the negotiation to come.
+  
+  “Valentina Petrovna,” he greeted in his{== carefully crafted==}{>>Sam Chapman, 2025-11-27T10:59:26Z: I like these use of words here! Carefully crafted subtly gets across that he's not native to Moscow, and carefully crafted almost makes it seem dubious, put on like a spy. It tells a lot with just two simple words.<<} Moscow accent. “Any ceramic caps today? The old Elektronika calculators keep dying on me.”
+  
+  She peered at him over half-moon spectacles. “Ah, the young repairman from… where was it again?”
+  
+  “Tekstilshchiki,” he answered smoothly, {==naming a working-class Moscow district. ==}{>>Sam Chapman, 2025-11-27T11:00:21Z: I wonder what Azamet is up to and who he really is! I'm wondering if his motives are for good or for bad.<<}“Small shop, but honest work.”{== Touching the notebook for reassurance, he focused on maintaining his cover story.==}{>>Sam Chapman, 2025-11-27T11:01:40Z: I don't think you need this sentence. The rest of the other sentences do a good job to show that he's making this up and it's some cover story. I think this sentence ends up over-explaining and loses some of the subtly.<<}
+  
+  “Honest work,” she mused, her tone carrying a hint of amusement. She pulled out a tray of components. “These might suit. Japanese manufacture, very reliable.”
+  
+  '''
+# ---
