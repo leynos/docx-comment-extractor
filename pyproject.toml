@@ -10,7 +10,7 @@ dependencies = []
 [dependency-groups]
 dev = [
     "pytest",
-    "ruff==0.14.13",
+    "ruff==0.15.20",
     "pyright",
     "pytest-timeout",
     "pytest-xdist",
