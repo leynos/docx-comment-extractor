@@ -25,7 +25,7 @@ jobs:
 
       - name: Install CLI tools
         run: |
-          for tool in mbake ty ruff; do uv tool install ${tool}; done
+          for tool in mbake ty; do uv tool install ${tool}; done
           npm install -g markdownlint-cli2
 
       - name: Validate Makefile
@@ -39,6 +39,9 @@ jobs:
 
       - name: Run ruff
         run: make lint
+
+      - name: Check spelling
+        run: make spelling
 
       - name: Run typechecker
         run: make typecheck

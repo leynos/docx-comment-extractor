@@ -1,3 +1,5 @@
+"""Provide the pure-Python implementation of the public greeting."""
+
 from __future__ import annotations
 
 
