@@ -1,6 +1,6 @@
 # Scripting standards
 
-Project scripts must prioritise clarity, reproducibility, and testability. The
+Project scripts must prioritize clarity, reproducibility, and testability. The
 baseline tooling is Python and the [`uv`](https://github.com/astral-sh/uv)
 launcher so that scripts remain dependency‑self‑contained and easy to execute
 in Continuous Integration (CI) or locally.
@@ -32,8 +32,9 @@ as a default.
   integration constraints require them, and any exception must be documented
   inline.
 - Each script starts with an `uv` script block so runtime and dependency
-  expectations travel with the file. Prefer the shebang `#!/usr/bin/env -S uv
-  run python` followed by the metadata block shown in the example below.
+  expectations travel with the file. Prefer the shebang
+  `#!/usr/bin/env -S uv run python` followed by the metadata block shown in the
+  example below.
 - External processes are invoked via [`plumbum`](https://plumbum.readthedocs.io)
   to provide structured command execution rather than ad‑hoc shell strings.
 - File‑system interactions use `pathlib.Path`. Higher‑level operations (for
@@ -99,16 +100,16 @@ def main(
     # Required parameters
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
-
     # Optional scalars
     package_name: Optional[str] = None,
     target: Optional[str] = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
-
     # Lists (whitespace/newline separated by default)
     formats: list[str] | None = None,
-    man_paths: Annotated[list[Path] | None, Parameter(env_var="INPUT_MAN_PATHS")] = None,
+    man_paths: Annotated[
+        list[Path] | None, Parameter(env_var="INPUT_MAN_PATHS")
+    ] = None,
     deb_depends: list[str] | None = None,
     rpm_depends: list[str] | None = None,
 ):
@@ -256,7 +257,9 @@ f.write_text("1.2.3\n", encoding="utf-8")
 version = f.read_text(encoding="utf-8").strip()
 
 # Atomic write pattern (tmp → replace)
-with tempfile.NamedTemporaryFile("w", delete=False, dir=f.parent, encoding="utf-8") as tmp:
+with tempfile.NamedTemporaryFile(
+    "w", delete=False, dir=f.parent, encoding="utf-8"
+) as tmp:
     tmp.write("new-contents\n")
     tmp_path = Path(tmp.name)
 
@@ -301,6 +304,7 @@ from plumbum.cmd import git
 
 app = App(config=cyclopts.config.Env("INPUT_", command=False))
 
+
 @app.default
 def main(
     *,
@@ -324,6 +328,7 @@ def main(
         "formats": formats or [],
         "dist": str(dist),
     })
+
 
 if __name__ == "__main__":
     app()
@@ -437,6 +442,38 @@ def test_spy_and_record(cmd_mox, monkeypatch, tmp_path):
 ```
 
 ## Operational guidelines
+
+### Shared spelling policy helper
+
+`make all` and `make markdownlint` enforce en-GB-oxendict spelling using the
+`TYPOS_VERSION` pin in the `Makefile`. The gate tests the policy helper,
+refreshes the shared base dictionary, generates `typos.toml`, and scans tracked
+Markdown files.
+
+The application targets Python 3.14, while the shared helper retains a Python
+3.13 compatibility contract for the wider estate. Project Ruff therefore
+uses the `RUFF_VERSION` pin in the `Makefile` and excludes `scripts/`;
+`spelling-helper-test` applies its separately pinned, isolated Ruff format and
+lint checks with `--target-version py313` before running the helper tests under
+Python 3.13. The project development dependency uses the same project Ruff
+version so direct `uv run ruff` invocations do not drift from the Make gates.
+
+The shared dictionary is maintained in `leynos/agent-helper-scripts`. Its
+repository-local cache and freshness metadata are untracked. The helper
+replaces the cache only when the authoritative copy is newer and can reuse a
+valid cached copy while offline. A clean checkout with an unavailable network
+retains the reviewed, tracked `typos.toml` policy.
+
+Do not edit generated entries in `typos.toml`. Put only repository-specific
+proper nouns, quoted upstream titles, fixtures, stems or exclusions in
+`typos.local.toml`, then regenerate with:
+
+```bash
+uv run scripts/generate_typos_config.py
+```
+
+Keep upstream API spellings in inline or fenced code where practical. The
+spelling gate deliberately ignores code spans and fenced code blocks.
 
 - Scripts must be idempotent. Re‑running should converge state without
   destructive side effects. Guard conditions (for example, checking the secrets

@@ -10,7 +10,7 @@ dependencies = []
 [dependency-groups]
 dev = [
     "pytest",
-    "ruff",
+    "ruff==0.14.13",
     "pyright",
     "pytest-timeout",
     "pytest-xdist",
@@ -19,6 +19,8 @@ dev = [
 [tool.ruff]
 line-length = 88
 preview = true
+# The estate spelling helper has its own Python 3.13 Ruff gate in the Makefile.
+extend-exclude = ["scripts"]
 
 [tool.ruff.lint]
 select = [
@@ -127,4 +129,3 @@ package = true
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-

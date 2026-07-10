@@ -1,16 +1,23 @@
 MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
 MDFORMAT_ALL ?= mdformat-all
-TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) uv
+TOOLS = $(MDFORMAT_ALL) ty $(MDLINT) uv
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
+RUFF_VERSION ?= 0.14.13
+RUFF = $(UV_ENV) uv tool run --from ruff==$(RUFF_VERSION) ruff
+TYPOS_VERSION ?= 1.48.0
+TYPOS = uv tool run typos@$(TYPOS_VERSION)
+SPELLING_RUFF_VERSION ?= 0.15.12
+SPELLING_RUFF = uv tool run --from ruff==$(SPELLING_RUFF_VERSION) ruff
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
-        markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
+        markdownlint nixie spelling spelling-helper-test test typecheck \
+        $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
 
-all: build check-fmt lint typecheck test
+all: build check-fmt lint typecheck test spelling
 
 .venv: pyproject.toml
 	$(UV_ENV) uv venv --clear
@@ -53,24 +60,39 @@ $(VENV_TOOLS): ## Verify required CLI tools in venv
 	$(call ensure_tool_venv,$@)
 endif
 
-fmt: ruff $(MDFORMAT_ALL) ## Format sources
-	ruff format
-	ruff check --select I --fix
+fmt: $(MDFORMAT_ALL) ## Format sources
+	$(RUFF) format
+	$(RUFF) check --select I --fix
 	$(MDFORMAT_ALL)
 
-check-fmt: ruff ## Verify formatting
-	ruff format --check
+check-fmt: ## Verify formatting
+	$(RUFF) format --check
 	# mdformat-all doesn't currently do checking
 
-lint: ruff ## Run linters
-	ruff check
+lint: ## Run linters
+	$(RUFF) check
 
 typecheck: build ty ## Run typechecking
 	ty --version
 	ty check
 
-markdownlint: $(MDLINT) ## Lint Markdown files
+markdownlint: $(MDLINT) spelling ## Lint Markdown files and enforce repository spelling
 	$(MDLINT) '**/*.md'
+
+spelling: spelling-helper-test ## Enforce en-GB-oxendict spelling in Markdown prose
+	@$(UV_ENV) uv run scripts/generate_typos_config.py
+	@git ls-files -z '*.md' | \
+		xargs -0 -r env $(UV_ENV) $(TYPOS) --config typos.toml --force-exclude
+
+spelling-helper-test: ## Validate the shared spelling-policy integration
+	@$(SPELLING_RUFF) format --check --isolated --target-version py313 scripts
+	@$(SPELLING_RUFF) check --isolated --target-version py313 scripts
+	@PYTHONPATH=scripts $(UV_ENV) uv run --no-project --python 3.13 \
+		--with pytest==9.0.2 --with pytest-cov==7.0.0 \
+		python -m pytest -c /dev/null --rootdir=. -p no:cacheprovider \
+		scripts/tests/test_typos_rollout.py \
+		--cov=generate_typos_config --cov=typos_rollout \
+		--cov=typos_rollout_cache --cov-fail-under=90
 
 nixie: ## Validate Mermaid diagrams
 	$(call ensure_tool,nixie)
