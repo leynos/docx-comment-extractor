@@ -16,7 +16,20 @@ BlockKind = typ.Literal["heading", "paragraph"]
 
 @dc.dataclass(frozen=True, slots=True)
 class Comment:
-    """Normalized Word comment metadata and body text."""
+    """Normalized Word comment metadata and body text.
+
+    Attributes
+    ----------
+    comment_id
+        Word comment identifier used to pair the comment with its anchors.
+    author
+        Normalized author name, or ``None`` when no author is available.
+    body
+        Normalized and flattened comment body text.
+    timestamp
+        UTC-normalized comment timestamp, or ``None`` when unavailable.
+
+    """
 
     comment_id: str
     author: str | None
@@ -26,7 +39,18 @@ class Comment:
 
 @dc.dataclass(frozen=True, slots=True)
 class Fragment:
-    """A text fragment plus comment boundaries attached to it."""
+    """A text fragment plus comment boundaries attached to it.
+
+    Attributes
+    ----------
+    text
+        Inline document text in source order.
+    start_comment_ids
+        Comment identifiers whose ranges open at this fragment.
+    end_comment_ids
+        Comment identifiers whose ranges close at this fragment.
+
+    """
 
     text: str
     start_comment_ids: tuple[str, ...] = ()
@@ -35,7 +59,18 @@ class Fragment:
 
 @dc.dataclass(frozen=True, slots=True)
 class Block:
-    """A document block in source order."""
+    """A document block in source order.
+
+    Attributes
+    ----------
+    kind
+        Rendering kind for the paragraph or heading block.
+    fragments
+        Ordered inline fragments contained by the block.
+    heading_level
+        Markdown heading level, or ``None`` for a body paragraph.
+
+    """
 
     kind: BlockKind
     fragments: tuple[Fragment, ...]
@@ -44,7 +79,16 @@ class Block:
 
 @dc.dataclass(frozen=True, slots=True)
 class DocumentModel:
-    """A normalized document ready for Markdown rendering."""
+    """A normalized document ready for Markdown rendering.
+
+    Attributes
+    ----------
+    blocks
+        Renderable document blocks in source order.
+    comments
+        Normalized comments referenced by fragment boundaries.
+
+    """
 
     blocks: tuple[Block, ...]
     comments: tuple[Comment, ...]
@@ -52,7 +96,16 @@ class DocumentModel:
 
 @dc.dataclass(frozen=True, slots=True)
 class ExtractionWarning:
-    """A non-fatal extraction warning."""
+    """A non-fatal extraction warning.
+
+    Attributes
+    ----------
+    code
+        Stable machine-readable warning category.
+    message
+        User-facing explanation of the extraction limitation.
+
+    """
 
     code: str
     message: str
@@ -60,7 +113,16 @@ class ExtractionWarning:
 
 @dc.dataclass(frozen=True, slots=True)
 class ExtractionResult:
-    """The extracted document plus any non-fatal warnings."""
+    """The extracted document plus any non-fatal warnings.
+
+    Attributes
+    ----------
+    document
+        Normalized document model produced by extraction.
+    warnings
+        Non-fatal issues encountered while extracting the document.
+
+    """
 
     document: DocumentModel
     warnings: tuple[ExtractionWarning, ...]

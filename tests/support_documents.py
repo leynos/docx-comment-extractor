@@ -25,7 +25,19 @@ NAIVE_COMMENT_TIMESTAMP = "2026-04-09T20:35:31"
 
 
 def build_simple_comment_docx(path: Path) -> Path:
-    """Create a document with a heading and one commented run."""
+    """Create a document with a heading and one commented run.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
     document = Document()
     document.add_heading("Sample heading", level=1)
     paragraph = document.add_paragraph()
@@ -43,7 +55,19 @@ def build_simple_comment_docx(path: Path) -> Path:
 
 
 def build_multi_run_comment_docx(path: Path) -> Path:
-    """Create a document whose comment spans multiple runs."""
+    """Create a document whose comment spans multiple runs.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
     document = Document()
     paragraph = document.add_paragraph()
     paragraph.add_run("Please review ")
@@ -62,7 +86,19 @@ def build_multi_run_comment_docx(path: Path) -> Path:
 
 
 def build_cross_paragraph_comment_docx(path: Path) -> Path:
-    """Create a document whose comment spans two paragraphs."""
+    """Create a document whose comment spans two paragraphs.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
     document = Document()
     first_paragraph = document.add_paragraph()
     first_paragraph.add_run("The first paragraph opens ")
@@ -82,7 +118,19 @@ def build_cross_paragraph_comment_docx(path: Path) -> Path:
 
 
 def build_table_docx(path: Path) -> Path:
-    """Create a document with an unsupported table block."""
+    """Create a document with an unsupported table block.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
     document = Document()
     document.add_paragraph("Before table.")
     table = document.add_table(rows=1, cols=1)
@@ -93,7 +141,19 @@ def build_table_docx(path: Path) -> Path:
 
 
 def build_criticmarkup_literal_docx(path: Path) -> Path:
-    """Create a document containing literal CriticMarkup delimiters."""
+    """Create a document containing literal CriticMarkup delimiters.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
     document = Document()
     paragraph = document.add_paragraph()
     run = paragraph.add_run("Literal {==marker==} text")
@@ -108,7 +168,19 @@ def build_criticmarkup_literal_docx(path: Path) -> Path:
 
 
 def build_comment_normalization_docx(path: Path) -> Path:
-    """Create a comment with blank authorship and a naive timestamp."""
+    """Create a comment with blank authorship and a naive timestamp.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
     document = Document()
     run = document.add_paragraph().add_run("Commented text")
     comment = document.add_comment(run, text="Normalize metadata.", author="   ")
@@ -118,7 +190,21 @@ def build_comment_normalization_docx(path: Path) -> Path:
 
 
 def build_fixture(name: str, path: Path) -> Path:
-    """Build a named fixture document at `path`."""
+    """Build a named fixture document at ``path``.
+
+    Parameters
+    ----------
+    name
+        Registered fixture scenario name.
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the selected fixture document has been saved.
+
+    """
     builders = {
         "simple-comment": build_simple_comment_docx,
         "multi-run-comment": build_multi_run_comment_docx,
