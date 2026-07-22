@@ -51,21 +51,44 @@ as a default.
 # ///
 
 from __future__ import annotations
-
 from pathlib import Path
-from plumbum import local
-from plumbum.cmd import tofu
+from typing import Optional, Annotated
+
+import cyclopts
+from cyclopts import App, Parameter
+from plumbum import local, FG
+from plumbum.cmd import git
+
+app = App(config=cyclopts.config.Env("INPUT_", command=False))
 
 
-def main() -> None:
+@app.default
+def main(
+    *,
+    bin_name: Annotated[str, Parameter(required=True)],
+    version: Annotated[str, Parameter(required=True)],
+    formats: list[str] | None = None,
+    outdir: Optional[Path] = None,
+    dry_run: bool = False,
+):
     project_root = Path(__file__).resolve().parents[1]
-    cluster_dir = project_root / "infra" / "clusters" / "dev"
-    with local.cwd(cluster_dir):
-        tofu["plan"]()
+    dist = (outdir or (project_root / "dist")) / bin_name
+    dist.mkdir(parents=True, exist_ok=True)
+
+    if not dry_run:
+        with local.cwd(project_root):
+            (git["tag", f"v{version}"] & FG)
+
+    print({
+        "bin_name": bin_name,
+        "version": version,
+        "formats": formats or [],
+        "dist": str(dist),
+    })
 
 
 if __name__ == "__main__":
-    main()
+    app()
 ```
 
 ### Cyclopts CLI pattern (environment‑first)
@@ -81,59 +104,40 @@ Employ Cyclopts when a script requires parameters, particularly under CI with
 # ///
 
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional, Annotated
 
 import cyclopts
 from cyclopts import App, Parameter
-from plumbum import local
-from plumbum.cmd import tofu
+from plumbum import local, FG
+from plumbum.cmd import git
 
-# Map INPUT_<PARAM> → function parameter without additional glue
 app = App(config=cyclopts.config.Env("INPUT_", command=False))
 
 
 @app.default
 def main(
     *,
-    # Required parameters
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
-    # Optional scalars
-    package_name: Optional[str] = None,
-    target: Optional[str] = None,
+    formats: list[str] | None = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
-    # Lists (whitespace/newline separated by default)
-    formats: list[str] | None = None,
-    man_paths: Annotated[
-        list[Path] | None, Parameter(env_var="INPUT_MAN_PATHS")
-    ] = None,
-    deb_depends: list[str] | None = None,
-    rpm_depends: list[str] | None = None,
 ):
-    name = package_name or bin_name
-
     project_root = Path(__file__).resolve().parents[1]
-    build_dir = (outdir or (project_root / "dist")) / name
+    dist = (outdir or (project_root / "dist")) / bin_name
+    dist.mkdir(parents=True, exist_ok=True)
 
-    if dry_run:
-        print({
-            "name": name,
-            "version": version,
-            "target": target,
-            "formats": formats,
-            "man_paths": [str(p) for p in (man_paths or [])],
-            "deb_depends": deb_depends,
-            "rpm_depends": rpm_depends,
-            "build_dir": str(build_dir),
-        })
-        return
+    if not dry_run:
+        with local.cwd(project_root):
+            (git["tag", f"v{version}"] & FG)
 
-    build_dir.mkdir(parents=True, exist_ok=True)
-    with local.cwd(build_dir):
-        tofu["plan"]()  # replace with real build tooling
+    print({
+        "bin_name": bin_name,
+        "version": version,
+        "formats": formats or [],
+        "dist": str(dist),
+    })
 
 
 if __name__ == "__main__":
@@ -238,9 +242,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DIST = PROJECT_ROOT / "dist"
-(DIST / "artifacts").mkdir(parents=True, exist_ok=True)
+(DIST / "artefacts").mkdir(parents=True, exist_ok=True)
 
-# Portable joins and normalisation
+# Portable joins and normalization
 cfg = PROJECT_ROOT.joinpath("config", "release.toml").resolve()
 ```
 
