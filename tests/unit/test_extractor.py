@@ -5,11 +5,48 @@ from __future__ import annotations
 import datetime as dt
 import typing as typ
 
-from docx_comment_extractor.extractor import extract_document
+import pytest
+from docx import Document
+
+from docx_comment_extractor.extractor import ExtractionError, extract_document
 from tests.support_documents import build_fixture
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
+
+    from docx.document import Document as WordDocument
+
+
+def test_extract_document_uses_injected_document_loader(tmp_path: Path) -> None:
+    """The public query should delegate package I/O to its loader boundary."""
+    document_path = build_fixture("simple-comment", tmp_path / "simple.docx")
+    loaded_paths: list[Path] = []
+
+    def load_document(path: Path) -> WordDocument:
+        """Record and load the requested package."""
+        loaded_paths.append(path)
+        return Document(str(path))
+
+    result = extract_document(document_path, document_loader=load_document)
+
+    assert loaded_paths == [document_path], (
+        "the injected loader should receive the path"
+    )
+    assert result.document.comments, "extraction should use the injected document"
+
+
+def test_extract_document_wraps_loader_failures(tmp_path: Path) -> None:
+    """Loader failures should cross the public API as an extraction error."""
+    document_path = tmp_path / "broken.docx"
+
+    def fail_to_load(path: Path) -> typ.NoReturn:
+        """Simulate an unreadable document package."""
+        del path
+        message = "storage detail"
+        raise OSError(message)
+
+    with pytest.raises(ExtractionError, match="Could not extract the Word document"):
+        extract_document(document_path, document_loader=fail_to_load)
 
 
 def test_extract_document_builds_simple_model(tmp_path: Path) -> None:

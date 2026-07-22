@@ -25,6 +25,7 @@ class CommandResult(typ.NamedTuple):
     returncode: int
     stdout: str
     stderr: str
+    output_path: Path | None = None
 
 
 @given(
@@ -54,6 +55,14 @@ def given_directory_document_path(tmp_path: Path) -> Path:
     """Provide a `.docx` path that exists but is not a file."""
     document_path = tmp_path / "directory.docx"
     document_path.mkdir()
+    return document_path
+
+
+@given("a corrupt Word document path", target_fixture="document_path")
+def given_corrupt_document_path(tmp_path: Path) -> Path:
+    """Provide a `.docx` path whose contents are not a Word package."""
+    document_path = tmp_path / "corrupt.docx"
+    document_path.write_text("not a Word package", encoding="utf-8")
     return document_path
 
 
@@ -94,8 +103,9 @@ def when_run_cli_with_output(document_path: Path, tmp_path: Path) -> CommandResu
     )
     return CommandResult(
         returncode=process.returncode,
-        stdout=str(output_path),
+        stdout=process.stdout,
         stderr=process.stderr,
+        output_path=output_path,
     )
 
 
@@ -132,10 +142,17 @@ def then_output_file_matches_snapshot(
     snapshot_name: str,
 ) -> None:
     """Compare the written output file against the approved snapshot."""
-    output_path = Path(command_result.stdout)
+    output_path = command_result.output_path
+    assert output_path is not None, "output mode should record its destination path"
     assert output_path.read_text(encoding="utf-8") == snapshot(name=snapshot_name), (
         "the output file should match the approved CLI snapshot"
     )
+
+
+@then("standard output is empty")
+def then_stdout_is_empty(command_result: CommandResult) -> None:
+    """Ensure file-output mode does not also emit Markdown to stdout."""
+    assert command_result.stdout == "", "output-file mode should keep stdout empty"
 
 
 @then("standard error is empty")
