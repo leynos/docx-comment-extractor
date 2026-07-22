@@ -41,6 +41,22 @@ def given_missing_document_path(tmp_path: Path) -> Path:
     return tmp_path / "missing.docx"
 
 
+@given("an invalid-extension document path", target_fixture="document_path")
+def given_invalid_extension_document_path(tmp_path: Path) -> Path:
+    """Provide an existing input with an unsupported extension."""
+    document_path = tmp_path / "invalid.txt"
+    document_path.write_text("not a Word document", encoding="utf-8")
+    return document_path
+
+
+@given("a directory document path", target_fixture="document_path")
+def given_directory_document_path(tmp_path: Path) -> Path:
+    """Provide a `.docx` path that exists but is not a file."""
+    document_path = tmp_path / "directory.docx"
+    document_path.mkdir()
+    return document_path
+
+
 @when("I run the extractor CLI on the document", target_fixture="command_result")
 def when_run_cli(document_path: Path) -> CommandResult:
     """Run the CLI and capture its output."""
