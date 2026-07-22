@@ -27,7 +27,6 @@ dev = [
 [tool.ruff]
 line-length = 88
 preview = true
-extend-exclude = ["scripts"]
 # The estate spelling helper has its own Python 3.13 Ruff gate in the Makefile.
 extend-exclude = ["scripts"]
 

@@ -15,7 +15,6 @@ with Word comments rendered inline using CriticMarkup.
   CriticMarkup comments.
 - Supports comment ranges that span multiple runs and multiple paragraphs.
 
-
 ## Usage
 
 Build the development environment:
@@ -35,7 +34,6 @@ Write directly to a file:
 ```bash
 docx-comment-extractor INPUT.docx --output output.md
 ```
-
 
 ## Documentation
 

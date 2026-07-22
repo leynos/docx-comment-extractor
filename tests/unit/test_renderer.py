@@ -6,6 +6,8 @@ import datetime as dt
 import typing as typ
 from pathlib import Path
 
+import pytest
+
 from docx_comment_extractor.extractor import extract_document
 from docx_comment_extractor.models import Comment
 from docx_comment_extractor.renderer import (
@@ -76,7 +78,11 @@ def test_render_document_snapshot_for_criticmarkup_literals(
 
 def test_render_sample_document_excerpt_snapshot(snapshot: SnapshotAssertion) -> None:
     """The provided sample document should keep a stable opening excerpt."""
-    result = extract_document(Path("commented-pentagon-draft-sam-c.docx"))
+    sample_path = Path("commented-pentagon-draft-sam-c.docx")
+    if not sample_path.is_file():
+        pytest.skip("the external sample document was not supplied")
+
+    result = extract_document(sample_path)
     rendered = render_document(result.document)
 
     assert rendered.count("{>>") == 247
