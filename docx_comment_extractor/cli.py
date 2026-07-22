@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import typing as typ
 from pathlib import Path  # noqa: TC003  # Cyclopts resolves annotations at runtime.
@@ -11,7 +12,7 @@ from cyclopts.exceptions import CycloptsError
 from rich.console import Console
 from rich.panel import Panel
 
-from .extractor import extract_document
+from .extractor import ExtractionError, extract_document
 from .renderer import render_document
 
 if typ.TYPE_CHECKING:
@@ -20,10 +21,16 @@ if typ.TYPE_CHECKING:
 STDOUT_CONSOLE = Console(file=sys.stdout)
 STDERR_CONSOLE = Console(file=sys.stderr, stderr=True)
 APP = App(help="Extract Word comments into inline CriticMarkup Markdown.")
+LOGGER = logging.getLogger(__name__)
 
 
 class UserFacingError(Exception):
     """An expected CLI error that should be presented cleanly."""
+
+    def __init__(self, message: str, *, operation: str = "validation") -> None:
+        """Store the safe operation name alongside the display message."""
+        super().__init__(message)
+        self.operation = operation
 
     @classmethod
     def invalid_extension(cls, path: Path) -> UserFacingError:
@@ -44,6 +51,13 @@ class UserFacingError(Exception):
     def output_alias(cls) -> UserFacingError:
         """Build an error for output paths that alias the input document."""
         return cls("Output path must not overwrite the input document.")
+
+    @classmethod
+    def output_write(cls) -> UserFacingError:
+        """Build an error for output destinations that cannot be written."""
+        return cls(
+            "Could not write the Markdown output file.", operation="output_write"
+        )
 
 
 @APP.default
@@ -74,16 +88,32 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     validated_input = _validate_input_path(input_docx)
     if output is not None:
         _validate_output_path(validated_input, output)
+    _log_event("validation", "success")
     result = extract_document(validated_input)
+    _log_event(
+        "extraction",
+        "success",
+        {
+            "comment_count": len(result.document.comments),
+            "warning_count": len(result.warnings),
+        },
+    )
     markdown = f"{render_document(result.document)}\n"
 
     if output is None:
         sys.stdout.write(markdown)
     else:
-        output.write_text(markdown, encoding="utf-8")
+        try:
+            output.write_text(markdown, encoding="utf-8")
+        except OSError as error:
+            raise UserFacingError.output_write() from error
+        _log_event("output_write", "success")
         _print_success(output, len(result.document.comments), len(result.warnings))
 
     if result.warnings:
+        _log_event(
+            "warning_summary", "reported", {"warning_count": len(result.warnings)}
+        )
         _print_warning_summary(result.warnings)
 
 
@@ -98,6 +128,11 @@ def main(tokens: cabc.Iterable[str] | None = None) -> None:
             print_error=False,
         )
     except UserFacingError as error:
+        _log_event(error.operation, "failure", {"error": type(error).__name__})
+        _print_error(str(error))
+        raise SystemExit(2) from error
+    except ExtractionError as error:
+        _log_event("extraction", "failure", {"error": type(error).__name__})
         _print_error(str(error))
         raise SystemExit(2) from error
     except CycloptsError as error:
@@ -106,6 +141,7 @@ def main(tokens: cabc.Iterable[str] | None = None) -> None:
 
 
 def _validate_input_path(path: Path) -> Path:
+    """Validate and return a readable Word input path."""
     if path.suffix.lower() != ".docx":
         raise UserFacingError.invalid_extension(path)
     if not path.exists():
@@ -116,21 +152,25 @@ def _validate_input_path(path: Path) -> Path:
 
 
 def _validate_output_path(input_docx: Path, output: Path) -> None:
+    """Reject output paths that alias the input document."""
     if _paths_refer_to_same_file(input_docx, output):
         raise UserFacingError.output_alias()
 
 
 def _paths_refer_to_same_file(input_docx: Path, output: Path) -> bool:
+    """Return whether two paths resolve to the same filesystem object."""
     if output.resolve() == input_docx.resolve():
         return True
     return output.exists() and output.samefile(input_docx)
 
 
 def _print_error(message: str) -> None:
+    """Render a user-facing error on standard error."""
     STDERR_CONSOLE.print(Panel.fit(message, title="Error", border_style="red"))
 
 
 def _print_success(output: Path, comment_count: int, warning_count: int) -> None:
+    """Render a successful output-file summary on standard error."""
     message = (
         f"Wrote Markdown to {output} "
         f"({comment_count} comments, {warning_count} warnings)."
@@ -139,6 +179,7 @@ def _print_success(output: Path, comment_count: int, warning_count: int) -> None
 
 
 def _print_warning_summary(warnings: cabc.Sequence[object]) -> None:
+    """Render the count of non-fatal extraction warnings."""
     count = len(warnings)
     label = "warning" if count == 1 else "warnings"
     STDERR_CONSOLE.print(
@@ -148,6 +189,18 @@ def _print_warning_summary(warnings: cabc.Sequence[object]) -> None:
             border_style="yellow",
         )
     )
+
+
+def _log_event(
+    operation: str,
+    outcome: str,
+    details: cabc.Mapping[str, object] | None = None,
+) -> None:
+    """Emit a bounded structured event without document payload data."""
+    fields: dict[str, object] = {"operation": operation, "outcome": outcome}
+    if details is not None:
+        fields.update(details)
+    LOGGER.info("CLI operation completed", extra=fields)
 
 
 if __name__ == "__main__":  # pragma: no cover
