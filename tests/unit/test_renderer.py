@@ -11,6 +11,7 @@ import pytest
 from docx_comment_extractor.extractor import extract_document
 from docx_comment_extractor.models import Comment
 from docx_comment_extractor.renderer import (
+    CRITICMARKUP_ESCAPE_SEQUENCES,
     escape_criticmarkup_text,
     format_comment_reference,
     heading_level_for_style,
@@ -44,12 +45,61 @@ def test_format_comment_reference_with_metadata() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("author", "body", "timestamp", "expected"),
+    [
+        (
+            "Reviewer",
+            "",
+            dt.datetime(2026, 4, 9, 20, 35, 31, tzinfo=dt.UTC),
+            "Reviewer, 2026-04-09T20:35:31Z",
+        ),
+        ("Reviewer", "", None, "Reviewer"),
+        (
+            None,
+            "",
+            dt.datetime(2026, 4, 9, 20, 35, 31, tzinfo=dt.UTC),
+            "2026-04-09T20:35:31Z",
+        ),
+        (None, "Tighten this sentence.", None, "Tighten this sentence."),
+        (None, "", None, ""),
+    ],
+)
+def test_format_comment_reference_edge_cases(
+    author: str | None,
+    body: str,
+    timestamp: dt.datetime | None,
+    expected: str,
+) -> None:
+    """Comment references should omit separators around absent fields."""
+    comment = Comment(
+        comment_id="test",
+        author=author,
+        body=body,
+        timestamp=timestamp,
+    )
+
+    assert format_comment_reference(comment) == expected
+
+
 def test_escape_criticmarkup_text() -> None:
     """Literal CriticMarkup delimiters should be neutralised."""
     assert (
         escape_criticmarkup_text("{==alpha==} {>>beta<<}")
         == "\\{==alpha==\\} \\{>>beta<<\\}"
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "replacement"),
+    CRITICMARKUP_ESCAPE_SEQUENCES,
+)
+def test_escape_criticmarkup_text_handles_every_delimiter(
+    source: str,
+    replacement: str,
+) -> None:
+    """Every supported CriticMarkup delimiter should be neutralized."""
+    assert escape_criticmarkup_text(source) == replacement
 
 
 def test_render_document_snapshot_for_cross_paragraph_comment(
