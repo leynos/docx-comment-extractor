@@ -14,7 +14,7 @@ The CLI installs as:
 docx-comment-extractor INPUT.docx [--output OUTPUT.md]
 ```
 
-You can also run the module entry point directly:
+The module entry point can also be run directly:
 
 ```bash
 python -m docx_comment_extractor.cli INPUT.docx
@@ -22,8 +22,8 @@ python -m docx_comment_extractor.cli INPUT.docx
 
 ## Writing to standard output
 
-When you omit `--output`, the extractor writes Markdown to standard output and
-keeps standard error quiet unless there is a warning or an error.
+When `--output` is omitted, the extractor writes Markdown to standard output
+and keeps standard error quiet unless there is a warning or an error.
 
 ```bash
 docx-comment-extractor draft.docx > draft.md
@@ -31,8 +31,8 @@ docx-comment-extractor draft.docx > draft.md
 
 ## Writing to a file
 
-When you pass `--output`, the extractor writes the Markdown file and prints a
-short success summary to standard error.
+When `--output` is provided, the extractor writes the Markdown file and prints
+a short success summary to standard error.
 
 ```bash
 docx-comment-extractor draft.docx --output draft.md
@@ -41,8 +41,8 @@ docx-comment-extractor draft.docx --output draft.md
 ## Output format
 
 The extractor preserves document order and maps Word heading styles to ATX
-Markdown headings. Word comments are rendered inline using a CriticMarkup
-highlight followed immediately by a CriticMarkup comment:
+(hash-prefixed) Markdown headings. Word comments are rendered inline using a
+CriticMarkup highlight followed immediately by a CriticMarkup comment:
 
 ```text
 Before {==commented text==}{>>Sam C, 2026-04-09T20:35:31Z: Needs evidence.<<} after.
