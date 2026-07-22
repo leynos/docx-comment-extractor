@@ -14,7 +14,7 @@ The CLI installs as:
 docx-comment-extractor INPUT.docx [--output OUTPUT.md]
 ```
 
-The module entry point can also be run directly:
+Run the module entry point directly as well:
 
 ```bash
 python -m docx_comment_extractor.cli INPUT.docx

@@ -156,7 +156,7 @@ Implement the first cut around four layers.
   `DocumentModel -> BlockModel -> InlineToken`, with comment anchors carrying
   `comment_id`, `author`, `date`, `comment_text`, and the spanned source text.
 
-`docx_comment_extractor.markdown_renderer`
+`docx_comment_extractor.renderer`
 
 - Convert the internal model into Markdown.
 - Map Word heading styles to ATX headings (`Heading1` -> `#`, `Heading2` ->
