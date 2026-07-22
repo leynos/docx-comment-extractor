@@ -146,11 +146,13 @@ Implement the first cut around four layers.
 
 `docx_comment_extractor.extractor`
 
-- Open the document via `python-docx`.
+- Open the document through an injectable loader whose default uses
+  `python-docx`, and translate known loading failures into `ExtractionError`.
 - Walk the main document body in source order, collecting block items
-  paragraph-by-paragraph.
+  through `Document.iter_inner_content()`.
 - Reconstruct comment anchor ranges by scanning the underlying XML elements for
   `w:commentRangeStart` and `w:commentRangeEnd`.
+- Isolate private `Paragraph._element` access in one compatibility adapter.
 - Resolve comment bodies and metadata through `Document.comments`.
 - Produce a typed internal representation such as:
   `DocumentModel -> BlockModel -> InlineToken`, with comment anchors carrying
@@ -170,6 +172,11 @@ Implement the first cut around four layers.
 
 - Hold the small immutable data structures and helper functions that make unit
   tests cheap to write.
+
+The CLI emits bounded standard-library logging events for validation,
+extraction, warnings, and output writes. Logging configuration remains the
+responsibility of the calling application or operator, and events exclude raw
+document content and filesystem paths.
 
 If warnings are needed, add `docx_comment_extractor.reporting` rather than
 burying `rich` calls inside extraction logic.
@@ -405,6 +412,9 @@ the user explicitly approves the plan or requests edits to it.
 - [x] 2026-04-09T22:31:00+01:00: Replayed `make fmt`,
   `make markdownlint`, `make nixie`, `make check-fmt`, `make lint`,
   `make typecheck`, and `make test` successfully.
+- [x] 2026-07-23: Addressed review follow-up by adding an injectable document
+  loader and explicit extraction error, expanding CLI validation coverage,
+  documenting developer workflows, and adding bounded structured events.
 
 ## Surprises & Discoveries
 
@@ -465,6 +475,13 @@ the user explicitly approves the plan or requests edits to it.
 - 2026-04-09T22:26:00+01:00: Keep `Path` as a runtime import in the CLI module
   and suppress the corresponding Ruff `TC003` warning narrowly. This is a real
   `cyclopts` runtime requirement rather than dead import noise.
+- 2026-07-23: Keep package loading behind an injectable `DocumentLoader` and
+  translate expected third-party failures into `ExtractionError` at that
+  boundary.
+- 2026-07-23: Use unconfigured standard-library logging with bounded operation,
+  outcome, error-class, and count fields. Exclude source payloads and raw paths.
+- 2026-07-23: Recommend future property-based tests for balanced cross-paragraph
+  ranges and CriticMarkup escaping without asserting false idempotence.
 
 ## Outcomes & Retrospective
 
@@ -482,3 +499,7 @@ The most useful implementation lessons were:
 - deterministic test fixtures require pinned comment timestamps, and
 - `cyclopts` performs real runtime annotation resolution, which makes some
   imports operational rather than type-only.
+
+Review follow-up hardened the loader and output boundaries, added regression
+coverage for user-facing validation, documented the development architecture,
+and made operational decisions observable without exposing document payloads.
