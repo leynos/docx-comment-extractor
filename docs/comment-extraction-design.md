@@ -23,12 +23,14 @@ The implementation is split into four modules:
   comment, and warning data structures.
 - `docx_comment_extractor.extractor` opens the Word document, normalizes
   comment metadata, and reconstructs comment ranges from `commentRangeStart`
-  and `commentRangeEnd` markers.
+  and `commentRangeEnd` markers. Its injectable document loader translates
+  known package and filesystem failures into `ExtractionError`.
 - `docx_comment_extractor.renderer` serializes the internal model to Markdown
   and CriticMarkup.
 - `docx_comment_extractor.cli` exposes the `cyclopts` command-line interface
   and uses `rich` for warnings, success messages, and clean user-facing
-  failures.
+  failures. It also emits bounded structured events through the Python standard
+  library logger without configuring application logging policy.
 
 ## Parsing strategy
 
@@ -36,14 +38,19 @@ The implementation is split into four modules:
 it does not provide a high-level comment-anchor abstraction. The extractor
 therefore uses a hybrid approach:
 
-1. Open the document with `docx.Document(...)`.
-2. Iterate top-level body children in source order.
-3. Pair each OOXML paragraph element with the corresponding
-   `python-docx Paragraph`.
-4. Within each paragraph, detect `commentRangeStart` and `commentRangeEnd`
+1. Load the document through an injectable adapter whose default calls
+   `docx.Document(...)`.
+2. Iterate public top-level paragraph and table objects in source order with
+   `Document.iter_inner_content()`.
+3. Within each paragraph, use the isolated private-OOXML adapter to detect
+   `commentRangeStart` and `commentRangeEnd`
    markers and attach those boundaries to text fragments.
-5. Ignore the zero-text `commentReference` runs that Word inserts after comment
+4. Ignore the zero-text `commentReference` runs that Word inserts after comment
    ends.
+
+Access to `Paragraph._element` is confined to
+`_iter_paragraph_xml_children`. This adapter is the single compatibility point
+for future `python-docx` private-interface changes.
 
 The supplied sample document contains 247 comments and 46 cross-paragraph
 comment ranges. A quick structure check also showed no nested or overlapping
@@ -83,6 +90,26 @@ The test suite combines three layers:
 Synthetic fixture documents force deterministic comment timestamps by setting a
 fixed `w:date` attribute on each generated comment. Without that override, the
 snapshot output would drift with the wall clock.
+
+A future Hypothesis suite should generate balanced comment boundaries across
+fragments and paragraphs. Each generated range must close exactly once after
+its matching start, and reconstruction must preserve source-text order. A
+second property should generate arbitrary text containing all supported
+CriticMarkup delimiters and verify that each literal delimiter is neutralized
+without changing other text. Escaping is not expected to be idempotent because
+reprocessing escaped input can add backslashes.
+
+## Observability
+
+The CLI records validation, extraction, warning-summary, and output-write
+decisions as structured standard-library logging events. Every event contains
+`operation` and `outcome`. Events may also contain an exception class name in
+`error` or bounded `comment_count` and `warning_count` values. No event contains
+document text, comment bodies, rendered Markdown, or raw filesystem paths.
+
+The package deliberately leaves handlers, formatting, and logging levels
+unconfigured. Applications embedding the public API and command operators can
+apply local logging policy without import-time side effects.
 
 ## Sample smoke run
 

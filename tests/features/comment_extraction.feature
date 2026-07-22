@@ -18,6 +18,7 @@ Feature: Extract inline comments from Word documents
     When I run the extractor CLI with an output file
     Then the command exits successfully
     And the output file matches the "simple_comment_output_file" snapshot
+    And standard output is empty
     And standard error contains "Wrote Markdown"
 
   Scenario: Reject a missing input path
@@ -37,3 +38,9 @@ Feature: Extract inline comments from Word documents
     When I run the extractor CLI on the document
     Then the command exits with an error
     And standard error contains "is not a file"
+
+  Scenario: Report a corrupt Word package cleanly
+    Given a corrupt Word document path
+    When I run the extractor CLI on the document
+    Then the command exits with an error
+    And standard error contains "Could not extract the Word document"
