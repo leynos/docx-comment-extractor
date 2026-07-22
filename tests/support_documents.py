@@ -21,6 +21,7 @@ class CommentElement(typ.Protocol):
 
 COMMENT_DATE_ATTR = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}date"
 FIXED_COMMENT_TIMESTAMP = "2026-04-09T20:35:31Z"
+NAIVE_COMMENT_TIMESTAMP = "2026-04-09T20:35:31"
 
 
 def build_simple_comment_docx(path: Path) -> Path:
@@ -106,6 +107,16 @@ def build_criticmarkup_literal_docx(path: Path) -> Path:
     return path
 
 
+def build_comment_normalization_docx(path: Path) -> Path:
+    """Create a comment with blank authorship and a naive timestamp."""
+    document = Document()
+    run = document.add_paragraph().add_run("Commented text")
+    comment = document.add_comment(run, text="Normalize metadata.", author="   ")
+    _set_timestamp(comment, NAIVE_COMMENT_TIMESTAMP)
+    document.save(str(path))
+    return path
+
+
 def build_fixture(name: str, path: Path) -> Path:
     """Build a named fixture document at `path`."""
     builders = {
@@ -114,14 +125,20 @@ def build_fixture(name: str, path: Path) -> Path:
         "cross-paragraph-comment": build_cross_paragraph_comment_docx,
         "table-document": build_table_docx,
         "criticmarkup-literal": build_criticmarkup_literal_docx,
+        "comment-normalization": build_comment_normalization_docx,
     }
     return builders[name](path)
 
 
 def _set_fixed_timestamp(comment: WordComment) -> None:
     """Force a deterministic comment timestamp for snapshot stability."""
+    _set_timestamp(comment, FIXED_COMMENT_TIMESTAMP)
+
+
+def _set_timestamp(comment: WordComment, value: str) -> None:
+    """Set the private OOXML timestamp used by a synthetic fixture."""
     element = typ.cast(
         "CommentElement",
         object.__getattribute__(comment, "_element"),
     )
-    element.set(COMMENT_DATE_ATTR, FIXED_COMMENT_TIMESTAMP)
+    element.set(COMMENT_DATE_ATTR, value)

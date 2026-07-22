@@ -25,3 +25,15 @@ Feature: Extract inline comments from Word documents
     When I run the extractor CLI on the document
     Then the command exits with an error
     And standard error contains "does not exist"
+
+  Scenario: Reject an invalid input extension
+    Given an invalid-extension document path
+    When I run the extractor CLI on the document
+    Then the command exits with an error
+    And standard error contains "must use the .docx extension"
+
+  Scenario: Reject a directory input path
+    Given a directory document path
+    When I run the extractor CLI on the document
+    Then the command exits with an error
+    And standard error contains "is not a file"

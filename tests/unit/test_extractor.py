@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import typing as typ
 
 from docx_comment_extractor.extractor import extract_document
@@ -24,6 +25,21 @@ def test_extract_document_builds_simple_model(tmp_path: Path) -> None:
     paragraph_fragments = result.document.blocks[1].fragments
     assert paragraph_fragments[1].start_comment_ids == ("0",)
     assert paragraph_fragments[1].end_comment_ids == ("0",)
+
+
+def test_extract_document_normalizes_comment_metadata(tmp_path: Path) -> None:
+    """Blank authors and naive timestamps should normalize predictably."""
+    document_path = build_fixture(
+        "comment-normalization",
+        tmp_path / "comment-normalization.docx",
+    )
+
+    result = extract_document(document_path)
+
+    assert result.warnings == ()
+    comment = result.document.comments[0]
+    assert comment.author is None
+    assert comment.timestamp == dt.datetime(2026, 4, 9, 20, 35, 31, tzinfo=dt.UTC)
 
 
 def test_extract_document_supports_multi_run_ranges(tmp_path: Path) -> None:
@@ -60,3 +76,7 @@ def test_extract_document_warns_for_tables(tmp_path: Path) -> None:
 
     assert len(result.warnings) == 1
     assert result.warnings[0].code == "unsupported-block"
+    assert [
+        "".join(fragment.text for fragment in block.fragments)
+        for block in result.document.blocks
+    ] == ["Before table.", "After table."]

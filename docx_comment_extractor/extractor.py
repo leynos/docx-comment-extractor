@@ -7,6 +7,8 @@ import datetime as dt
 import typing as typ
 
 from docx import Document
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 from .models import (
     Block,
@@ -23,7 +25,6 @@ if typ.TYPE_CHECKING:
 
     from docx.comments import Comment as WordComment
     from docx.document import Document as WordDocument
-    from docx.text.paragraph import Paragraph
 
 
 class XmlElement(typ.Protocol):
@@ -35,6 +36,9 @@ class XmlElement(typ.Protocol):
 
     def iter(self) -> typ.Iterator[XmlElement]:
         """Yield descendant elements in document order."""
+
+    def iterchildren(self) -> typ.Iterator[XmlElement]:
+        """Yield direct child elements in document order."""
 
 
 def extract_document(path: Path) -> ExtractionResult:
@@ -86,24 +90,18 @@ def _extract_blocks(
 ) -> tuple[list[Block], list[ExtractionWarning]]:
     blocks: list[Block] = []
     warnings: list[ExtractionWarning] = []
-    paragraphs = iter(document.paragraphs)
 
-    for child in document._body._element.iterchildren():
-        local_name = _local_name(child)
-        if local_name == "p":
-            paragraph = next(paragraphs)
-            blocks.append(_extract_paragraph_block(paragraph))
+    for item in document.iter_inner_content():
+        if isinstance(item, Paragraph):
+            blocks.append(_extract_paragraph_block(item))
             continue
-        if local_name == "tbl":
+        if isinstance(item, Table):
             warnings.append(
                 ExtractionWarning(
                     code="unsupported-block",
                     message="Encountered an unsupported top-level table block.",
                 )
             )
-            continue
-        if local_name == "sectPr":
-            continue
 
     return blocks, warnings
 
@@ -112,7 +110,7 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
     fragments: list[Fragment] = []
     pending_start_ids: list[str] = []
 
-    for child in paragraph._element.iterchildren():
+    for child in _iter_paragraph_xml_children(paragraph):
         local_name = _local_name(child)
         if local_name == "commentRangeStart":
             pending_start_ids.append(_comment_id(child))
@@ -147,6 +145,15 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
         fragments=tuple(fragments),
         heading_level=heading_level,
     )
+
+
+def _iter_paragraph_xml_children(paragraph: Paragraph) -> typ.Iterator[XmlElement]:
+    """Yield the private OOXML children behind a public paragraph object."""
+    element = typ.cast(
+        "XmlElement",
+        object.__getattribute__(paragraph, "_element"),
+    )
+    return element.iterchildren()
 
 
 def _extract_inline_text(element: XmlElement) -> str:
