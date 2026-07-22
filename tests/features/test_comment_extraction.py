@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess  # noqa: S404
+import subprocess  # noqa: S404  # Required for behavioural CLI process coverage.
 import sys
 import typing as typ
 from pathlib import Path
@@ -60,7 +60,7 @@ def given_directory_document_path(tmp_path: Path) -> Path:
 @when("I run the extractor CLI on the document", target_fixture="command_result")
 def when_run_cli(document_path: Path) -> CommandResult:
     """Run the CLI and capture its output."""
-    process = subprocess.run(  # noqa: S603
+    process = subprocess.run(  # noqa: S603  # Fixed argv with pytest-owned paths.
         [sys.executable, "-m", "docx_comment_extractor.cli", str(document_path)],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -78,7 +78,7 @@ def when_run_cli(document_path: Path) -> CommandResult:
 def when_run_cli_with_output(document_path: Path, tmp_path: Path) -> CommandResult:
     """Run the CLI and write its output to a file."""
     output_path = tmp_path / "output.md"
-    process = subprocess.run(  # noqa: S603
+    process = subprocess.run(  # noqa: S603  # Fixed argv with pytest-owned paths.
         [
             sys.executable,
             "-m",
@@ -102,13 +102,15 @@ def when_run_cli_with_output(document_path: Path, tmp_path: Path) -> CommandResu
 @then("the command exits successfully")
 def then_command_succeeds(command_result: CommandResult) -> None:
     """Verify a successful exit code."""
-    assert command_result.returncode == 0
+    assert command_result.returncode == 0, (
+        "the CLI success scenario should exit with status 0"
+    )
 
 
 @then("the command exits with an error")
 def then_command_fails(command_result: CommandResult) -> None:
     """Verify a failing exit code."""
-    assert command_result.returncode != 0
+    assert command_result.returncode != 0, "the CLI error scenario should exit non-zero"
 
 
 @then(parsers.parse('standard output matches the "{snapshot_name}" snapshot'))
@@ -118,7 +120,9 @@ def then_stdout_matches_snapshot(
     snapshot_name: str,
 ) -> None:
     """Compare stdout against the approved snapshot."""
-    assert command_result.stdout == snapshot(name=snapshot_name)
+    assert command_result.stdout == snapshot(name=snapshot_name), (
+        "standard output should match the approved CLI snapshot"
+    )
 
 
 @then(parsers.parse('the output file matches the "{snapshot_name}" snapshot'))
@@ -129,16 +133,22 @@ def then_output_file_matches_snapshot(
 ) -> None:
     """Compare the written output file against the approved snapshot."""
     output_path = Path(command_result.stdout)
-    assert output_path.read_text(encoding="utf-8") == snapshot(name=snapshot_name)
+    assert output_path.read_text(encoding="utf-8") == snapshot(name=snapshot_name), (
+        "the output file should match the approved CLI snapshot"
+    )
 
 
 @then("standard error is empty")
 def then_stderr_is_empty(command_result: CommandResult) -> None:
     """Ensure no extra terminal output leaked on success-to-stdout runs."""
-    assert command_result.stderr == ""
+    assert command_result.stderr == "", (
+        "successful stdout mode should keep stderr empty"
+    )
 
 
 @then(parsers.parse('standard error contains "{text}"'))
 def then_stderr_contains(command_result: CommandResult, text: str) -> None:
     """Verify stderr output contains expected text."""
-    assert text in command_result.stderr
+    assert text in command_result.stderr, (
+        "stderr should contain the expected user-facing text"
+    )
