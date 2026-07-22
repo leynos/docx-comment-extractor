@@ -7,9 +7,9 @@ Implemented in the initial inline CriticMarkup release.
 ## Overview
 
 The extractor uses `python-docx` as the document entry point and then walks the
-underlying OOXML paragraph content to reconstruct comment anchor ranges.
-Rendered Markdown uses CriticMarkup highlights followed immediately by
-CriticMarkup comments, for example:
+underlying Office Open XML (OOXML) paragraph content to reconstruct comment
+anchor ranges. Rendered Markdown uses CriticMarkup highlights followed
+immediately by CriticMarkup comments, for example:
 
 ```text
 {==commented text==}{>>Author, 2026-04-09T20:35:31Z: note<<}
@@ -53,7 +53,7 @@ start and end markers rather than a general overlap graph.
 ## Rendering rules
 
 - Word heading styles named `Heading 1` through `Heading 6`, with or without a
-  space before the number, are rendered as ATX headings.
+  space before the number, are rendered as ATX (hash-prefixed) headings.
 - Comment metadata is normalized to
   `Author, YYYY-MM-DDTHH:MM:SSZ: comment text` when author and timestamp are
   available.
