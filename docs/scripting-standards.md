@@ -144,56 +144,6 @@ if __name__ == "__main__":
     app()
 ```
 
-# Map INPUT_<PARAM> → function parameter without additional glue
-app = App(config=cyclopts.config.Env("INPUT_", command=False))
-
-
-@app.default
-def main(
-    *,
-    # Required parameters
-    bin_name: Annotated[str, Parameter(required=True)],
-    version: Annotated[str, Parameter(required=True)],
-    # Optional scalars
-    package_name: Optional[str] = None,
-    target: Optional[str] = None,
-    outdir: Optional[Path] = None,
-    dry_run: bool = False,
-    # Lists (whitespace/newline separated by default)
-    formats: list[str] | None = None,
-    man_paths: Annotated[
-        list[Path] | None, Parameter(env_var="INPUT_MAN_PATHS")
-    ] = None,
-    deb_depends: list[str] | None = None,
-    rpm_depends: list[str] | None = None,
-):
-    name = package_name or bin_name
-
-    project_root = Path(__file__).resolve().parents[1]
-    build_dir = (outdir or (project_root / "dist")) / name
-
-    if dry_run:
-        print({
-            "name": name,
-            "version": version,
-            "target": target,
-            "formats": formats,
-            "man_paths": [str(p) for p in (man_paths or [])],
-            "deb_depends": deb_depends,
-            "rpm_depends": rpm_depends,
-            "build_dir": str(build_dir),
-        })
-        return
-
-    build_dir.mkdir(parents=True, exist_ok=True)
-    with local.cwd(build_dir):
-        tofu["plan"]()  # replace with real build tooling
-
-
-if __name__ == "__main__":
-    app()
-```
-
 Guidance:
 
 - Parameter names should be descriptive and stable. Where a legacy flag name
@@ -292,9 +242,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DIST = PROJECT_ROOT / "dist"
-(DIST / "artifacts").mkdir(parents=True, exist_ok=True)
+(DIST / "artefacts").mkdir(parents=True, exist_ok=True)
 
-# Portable joins and normalisation
+# Portable joins and normalization
 cfg = PROJECT_ROOT.joinpath("config", "release.toml").resolve()
 ```
 

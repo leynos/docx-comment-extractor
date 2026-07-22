@@ -37,7 +37,7 @@ def _render_block(block: Block, comment_lookup: dict[str, Comment]) -> str:
     if block.heading_level is not None:
         prefix = f"{'#' * block.heading_level} "
 
-    parts = [prefix]
+    parts: list[str] = [prefix]
     for fragment in block.fragments:
         parts.extend("{==" for _comment_id in fragment.start_comment_ids)
         parts.append(escape_criticmarkup_text(fragment.text))
