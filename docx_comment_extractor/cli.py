@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import typing as typ
-from pathlib import Path  # noqa: TC003
+from pathlib import Path  # noqa: TC003  # Cyclopts resolves annotations at runtime.
 
 from cyclopts import App
 from cyclopts.exceptions import CycloptsError
@@ -40,11 +40,40 @@ class UserFacingError(Exception):
         """Build an error for non-file inputs."""
         return cls(f"Input path '{path}' is not a file.")
 
+    @classmethod
+    def output_alias(cls) -> UserFacingError:
+        """Build an error for output paths that alias the input document."""
+        return cls("Output path must not overwrite the input document.")
+
 
 @APP.default
 def extract_comments(input_docx: Path, output: Path | None = None) -> None:
-    """Extract inline CriticMarkup Markdown from `input_docx`."""
+    """Extract inline CriticMarkup Markdown from ``input_docx``.
+
+    Parameters
+    ----------
+    input_docx
+        Path to the Word ``.docx`` document to extract.
+    output
+        Optional destination for the rendered Markdown. When omitted, output
+        is written to standard output.
+
+    Returns
+    -------
+    None
+        The command returns after writing the rendered Markdown and reports a
+        success summary to standard error when ``output`` is provided.
+
+    Raises
+    ------
+    UserFacingError
+        If an input or output path fails command validation. ``main`` presents
+        the error and exits with status 2.
+
+    """
     validated_input = _validate_input_path(input_docx)
+    if output is not None:
+        _validate_output_path(validated_input, output)
     result = extract_document(validated_input)
     markdown = f"{render_document(result.document)}\n"
 
@@ -84,6 +113,17 @@ def _validate_input_path(path: Path) -> Path:
     if not path.is_file():
         raise UserFacingError.not_a_file(path)
     return path
+
+
+def _validate_output_path(input_docx: Path, output: Path) -> None:
+    if _paths_refer_to_same_file(input_docx, output):
+        raise UserFacingError.output_alias()
+
+
+def _paths_refer_to_same_file(input_docx: Path, output: Path) -> bool:
+    if output.resolve() == input_docx.resolve():
+        return True
+    return output.exists() and output.samefile(input_docx)
 
 
 def _print_error(message: str) -> None:

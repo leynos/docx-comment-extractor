@@ -42,7 +42,24 @@ class XmlElement(typ.Protocol):
 
 
 def extract_document(path: Path) -> ExtractionResult:
-    """Extract paragraphs, headings, comments, and warnings from `path`."""
+    """Extract paragraphs, headings, comments, and warnings from ``path``.
+
+    Parameters
+    ----------
+    path
+        Path to the Word ``.docx`` document to extract.
+
+    Returns
+    -------
+    ExtractionResult
+        The normalized document model and any non-fatal extraction warnings.
+
+    Raises
+    ------
+    docx.opc.exceptions.PackageNotFoundError
+        If ``path`` cannot be opened as an Office Open XML package.
+
+    """
     document = Document(str(path))
     comments = _extract_comments(document)
     blocks, warnings = _extract_blocks(document)
@@ -92,16 +109,16 @@ def _extract_blocks(
     warnings: list[ExtractionWarning] = []
 
     for item in document.iter_inner_content():
-        if isinstance(item, Paragraph):
-            blocks.append(_extract_paragraph_block(item))
-            continue
-        if isinstance(item, Table):
-            warnings.append(
-                ExtractionWarning(
-                    code="unsupported-block",
-                    message="Encountered an unsupported top-level table block.",
+        match item:
+            case Paragraph():
+                blocks.append(_extract_paragraph_block(item))
+            case Table():
+                warnings.append(
+                    ExtractionWarning(
+                        code="unsupported-block",
+                        message="Encountered an unsupported top-level table block.",
+                    )
                 )
-            )
 
     return blocks, warnings
 
@@ -111,31 +128,28 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
     pending_start_ids: list[str] = []
 
     for child in _iter_paragraph_xml_children(paragraph):
-        local_name = _local_name(child)
-        if local_name == "commentRangeStart":
-            pending_start_ids.append(_comment_id(child))
-            continue
-
-        if local_name == "commentRangeEnd":
-            if fragments:
-                fragments[-1] = dc.replace(
-                    fragments[-1],
-                    end_comment_ids=(
-                        *fragments[-1].end_comment_ids,
-                        _comment_id(child),
-                    ),
-                )
-            continue
-
-        text = _extract_inline_text(child)
-        if text:
-            fragments.append(
-                Fragment(
-                    text=text,
-                    start_comment_ids=tuple(pending_start_ids),
-                )
-            )
-            pending_start_ids.clear()
+        match _local_name(child):
+            case "commentRangeStart":
+                pending_start_ids.append(_comment_id(child))
+            case "commentRangeEnd":
+                if fragments:
+                    fragments[-1] = dc.replace(
+                        fragments[-1],
+                        end_comment_ids=(
+                            *fragments[-1].end_comment_ids,
+                            _comment_id(child),
+                        ),
+                    )
+            case _:
+                text = _extract_inline_text(child)
+                if text:
+                    fragments.append(
+                        Fragment(
+                            text=text,
+                            start_comment_ids=tuple(pending_start_ids),
+                        )
+                    )
+                    pending_start_ids.clear()
 
     style_name = paragraph.style.name if paragraph.style is not None else ""
     heading_level = heading_level_for_style(style_name)

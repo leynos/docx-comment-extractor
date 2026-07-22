@@ -25,9 +25,15 @@ if typ.TYPE_CHECKING:
 
 def test_heading_level_for_style() -> None:
     """Heading styles should map to Markdown ATX levels."""
-    assert heading_level_for_style("Heading 1") == 1
-    assert heading_level_for_style("Heading2") == 2
-    assert heading_level_for_style("Body Text") is None
+    assert heading_level_for_style("Heading 1") == 1, (
+        "Heading 1 should map to ATX level 1"
+    )
+    assert heading_level_for_style("Heading2") == 2, (
+        "Heading2 should map to ATX level 2"
+    )
+    assert heading_level_for_style("Body Text") is None, (
+        "non-heading styles should not receive an ATX level"
+    )
 
 
 def test_format_comment_reference_with_metadata() -> None:
@@ -42,7 +48,7 @@ def test_format_comment_reference_with_metadata() -> None:
     assert (
         format_comment_reference(comment)
         == "Reviewer, 2026-04-09T20:35:31Z: Tighten this sentence."
-    )
+    ), "comment references should render author, UTC timestamp, and body"
 
 
 @pytest.mark.parametrize(
@@ -79,7 +85,9 @@ def test_format_comment_reference_edge_cases(
         timestamp=timestamp,
     )
 
-    assert format_comment_reference(comment) == expected
+    assert format_comment_reference(comment) == expected, (
+        "comment references should omit separators around missing fields"
+    )
 
 
 def test_escape_criticmarkup_text() -> None:
@@ -87,7 +95,7 @@ def test_escape_criticmarkup_text() -> None:
     assert (
         escape_criticmarkup_text("{==alpha==} {>>beta<<}")
         == "\\{==alpha==\\} \\{>>beta<<\\}"
-    )
+    ), "literal CriticMarkup highlight and comment markers should be escaped"
 
 
 @pytest.mark.parametrize(
@@ -99,7 +107,9 @@ def test_escape_criticmarkup_text_handles_every_delimiter(
     replacement: str,
 ) -> None:
     """Every supported CriticMarkup delimiter should be neutralized."""
-    assert escape_criticmarkup_text(source) == replacement
+    assert escape_criticmarkup_text(source) == replacement, (
+        "each configured CriticMarkup delimiter should use its mapped escape"
+    )
 
 
 def test_render_document_snapshot_for_cross_paragraph_comment(
@@ -111,7 +121,9 @@ def test_render_document_snapshot_for_cross_paragraph_comment(
 
     result = extract_document(document_path)
 
-    assert render_document(result.document) == snapshot
+    assert render_document(result.document) == snapshot, (
+        "cross-paragraph CriticMarkup rendering should match the approved snapshot"
+    )
 
 
 def test_render_document_snapshot_for_criticmarkup_literals(
@@ -123,19 +135,25 @@ def test_render_document_snapshot_for_criticmarkup_literals(
 
     result = extract_document(document_path)
 
-    assert render_document(result.document) == snapshot
+    assert render_document(result.document) == snapshot, (
+        "literal CriticMarkup rendering should match the approved escaped snapshot"
+    )
 
 
 def test_render_sample_document_excerpt_snapshot(snapshot: SnapshotAssertion) -> None:
     """The provided sample document should keep a stable opening excerpt."""
-    sample_path = Path("commented-pentagon-draft-sam-c.docx")
+    sample_path = (
+        Path(__file__).resolve().parents[2] / "commented-pentagon-draft-sam-c.docx"
+    )
     if not sample_path.is_file():
         pytest.skip("the external sample document was not supplied")
 
     result = extract_document(sample_path)
     rendered = render_document(result.document)
 
-    assert rendered.count("{>>") == 247
-    assert rendered.count("{==") == 247
+    assert rendered.count("{>>") == 247, (
+        "the sample should render all 247 comment markers"
+    )
+    assert rendered.count("{==") == 247, "the sample should render all 247 highlights"
     excerpt = "\n".join(rendered.splitlines()[:40])
-    assert excerpt == snapshot
+    assert excerpt == snapshot, "the sample opening excerpt should match its snapshot"
