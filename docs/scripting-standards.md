@@ -451,8 +451,8 @@ refreshes the shared base dictionary, generates `typos.toml`, and scans tracked
 Markdown files.
 
 The application targets Python 3.14, while the shared helper retains a Python
-3.13 compatibility contract for the wider estate. Project Ruff therefore
-uses the `RUFF_VERSION` pin in the `Makefile` and excludes `scripts/`;
+3.13 compatibility contract for the wider estate. Project Ruff therefore uses
+the `RUFF_VERSION` pin in the `Makefile` and excludes `scripts/`;
 `spelling-helper-test` applies its separately pinned, isolated Ruff format and
 lint checks with `--target-version py313` before running the helper tests under
 Python 3.13. The project development dependency uses the same project Ruff
