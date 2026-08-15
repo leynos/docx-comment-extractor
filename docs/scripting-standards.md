@@ -41,7 +41,7 @@ as a default.
   example, copying or removing trees) go through the `shutil` standard library
   module.
 
-### Minimal script (no CLI)
+### Minimal Cyclopts CLI example
 
 ```python
 #!/usr/bin/env -S uv run python
@@ -67,17 +67,20 @@ def main(
     *,
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
+    project_dir: Annotated[Path, Parameter(env_var="INPUT_PROJECT_DIR")] = Path.cwd(),
     formats: list[str] | None = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
 ):
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
     dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
+        tag = f"v{version}"
         with local.cwd(project_root):
-            (git["tag", f"v{version}"] & FG)
+            if not git["tag", "--list", tag]().strip():
+                (git["tag", tag] & FG)
 
     print({
         "bin_name": bin_name,
@@ -120,17 +123,20 @@ def main(
     *,
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
+    project_dir: Annotated[Path, Parameter(env_var="INPUT_PROJECT_DIR")] = Path.cwd(),
     formats: list[str] | None = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
 ):
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
     dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
+        tag = f"v{version}"
         with local.cwd(project_root):
-            (git["tag", f"v{version}"] & FG)
+            if not git["tag", "--list", tag]().strip():
+                (git["tag", tag] & FG)
 
     print({
         "bin_name": bin_name,
@@ -171,7 +177,7 @@ Guidance:
 ### Basics: command calls, capturing output, handling failures
 
 ```python
-from __future__ annotations
+from __future__ import annotations
 from plumbum import local
 from plumbum.cmd import git, grep
 
@@ -314,17 +320,20 @@ def main(
     *,
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
+    project_dir: Annotated[Path, Parameter(env_var="INPUT_PROJECT_DIR")] = Path.cwd(),
     formats: list[str] | None = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
 ):
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
     dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
+        tag = f"v{version}"
         with local.cwd(project_root):
-            (git["tag", f"v{version}"] & FG)
+            if not git["tag", "--list", tag]().strip():
+                (git["tag", tag] & FG)
 
     print({
         "bin_name": bin_name,
@@ -355,31 +364,30 @@ if __name__ == "__main__":
 ### Mocking Python dependencies (pytest-mock) and environment (monkeypatch)
 
 ```python
-import os
-from pathlib import Path
-from cyclopts.testing import invoke
 from scripts.package import app
 
 
-def test_reads_env_and_defaults(monkeypatch, tmp_path):
+def test_reads_env_and_defaults(monkeypatch, capsys, tmp_path):
     # Arrange env for Cyclopts
     monkeypatch.setenv("INPUT_BIN_NAME", "demo")
     monkeypatch.setenv("INPUT_VERSION", "1.2.3")
     monkeypatch.setenv("INPUT_FORMATS", "deb rpm")  # whitespace or newlines
+    monkeypatch.setenv("INPUT_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("INPUT_DRY_RUN", "true")
 
     # Exercise
-    result = invoke(app, [])
+    app(tokens=[])
+    captured = capsys.readouterr()
 
     # Assert
-    assert result.exit_code == 0
-    assert '"version": "1.2.3"' in result.stdout
+    assert '"version": "1.2.3"' in captured.out
 
 
 def test_patch_python_dependency(mocker):
     # Example: patch a helper function used by the script
     from scripts import helpers
 
-    mocker.patch_object(helpers, "compute_checksum", return_value="deadbeef")
+    mocker.patch.object(helpers, "compute_checksum", return_value="deadbeef")
     assert helpers.compute_checksum(b"abc") == "deadbeef"
 ```
 
