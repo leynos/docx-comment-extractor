@@ -109,6 +109,37 @@ def when_run_cli_with_output(document_path: Path, tmp_path: Path) -> CommandResu
     )
 
 
+@when(
+    "I run the extractor CLI with an unavailable output file",
+    target_fixture="command_result",
+)
+def when_run_cli_with_unavailable_output(
+    document_path: Path, tmp_path: Path
+) -> CommandResult:
+    """Run the CLI with an output parent that does not exist."""
+    output_path = tmp_path / "missing" / "output.md"
+    process = subprocess.run(  # noqa: S603  # Fixed argv with pytest-owned paths.
+        [
+            sys.executable,
+            "-m",
+            "docx_comment_extractor.cli",
+            str(document_path),
+            "--output",
+            str(output_path),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return CommandResult(
+        returncode=process.returncode,
+        stdout=process.stdout,
+        stderr=process.stderr,
+        output_path=output_path,
+    )
+
+
 @then("the command exits successfully")
 def then_command_succeeds(command_result: CommandResult) -> None:
     """Verify a successful exit code."""
@@ -120,7 +151,9 @@ def then_command_succeeds(command_result: CommandResult) -> None:
 @then("the command exits with an error")
 def then_command_fails(command_result: CommandResult) -> None:
     """Verify a failing exit code."""
-    assert command_result.returncode != 0, "the CLI error scenario should exit non-zero"
+    assert command_result.returncode == 2, (
+        "a handled CLI error should exit with the documented status 2"
+    )
 
 
 @then(parsers.parse('standard output matches the "{snapshot_name}" snapshot'))

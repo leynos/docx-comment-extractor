@@ -107,6 +107,13 @@ decisions as structured standard-library logging events. Every event contains
 `error` or bounded `comment_count` and `warning_count` values. No event contains
 document text, comment bodies, rendered Markdown, or raw filesystem paths.
 
+The process maintains bounded in-process counters by operation and outcome,
+plus monotonic duration totals. Failure events use stable categories, including
+`argument_parsing`, rather than requiring consumers to match free-form
+exception text. These counters and durations are process-local and are not
+persisted. They contain no document text, comment bodies, rendered Markdown, or
+raw filesystem paths.
+
 File output uses a same-directory temporary file and atomic replacement, so a
 failed write leaves an existing output file unchanged.
 
