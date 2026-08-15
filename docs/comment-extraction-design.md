@@ -107,6 +107,9 @@ decisions as structured standard-library logging events. Every event contains
 `error` or bounded `comment_count` and `warning_count` values. No event contains
 document text, comment bodies, rendered Markdown, or raw filesystem paths.
 
+File output uses a same-directory temporary file and atomic replacement, so a
+failed write leaves an existing output file unchanged.
+
 The package deliberately leaves handlers, formatting, and logging levels
 unconfigured. Applications embedding the public API and command operators can
 apply local logging policy without import-time side effects.

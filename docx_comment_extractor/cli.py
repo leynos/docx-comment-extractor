@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+import tempfile
 import typing as typ
-from pathlib import Path  # noqa: TC003  # Cyclopts resolves annotations at runtime.
+from contextlib import suppress
+from pathlib import Path
 
 from cyclopts import App
 from cyclopts.exceptions import CycloptsError
@@ -103,10 +106,7 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     if output is None:
         sys.stdout.write(markdown)
     else:
-        try:
-            output.write_text(markdown, encoding="utf-8")
-        except OSError as error:
-            raise UserFacingError.output_write() from error
+        _write_output_atomically(output, markdown)
         _log_event("output_write", "success")
         _print_success(output, len(result.document.comments), len(result.warnings))
 
@@ -162,6 +162,31 @@ def _paths_refer_to_same_file(input_docx: Path, output: Path) -> bool:
     if output.resolve() == input_docx.resolve():
         return True
     return output.exists() and output.samefile(input_docx)
+
+
+def _write_output_atomically(output: Path, markdown: str) -> None:
+    """Write Markdown through a same-directory temporary file and replacement."""
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            dir=output.parent,
+            encoding="utf-8",
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_file.write(markdown)
+            temporary_path = Path(temporary_file.name)
+        os.replace(  # noqa: PTH105  # Required atomic-replacement primitive.
+            temporary_path,
+            output,
+        )
+    except OSError as error:
+        if temporary_path is not None:
+            with suppress(OSError):
+                temporary_path.unlink(missing_ok=True)
+        raise UserFacingError.output_write() from error
 
 
 def _print_error(message: str) -> None:
