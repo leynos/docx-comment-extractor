@@ -6,7 +6,10 @@ import logging
 import os
 import sys
 import tempfile
+import threading
+import time
 import typing as typ
+from collections import Counter
 from contextlib import suppress
 from pathlib import Path
 
@@ -25,6 +28,9 @@ STDOUT_CONSOLE = Console(file=sys.stdout)
 STDERR_CONSOLE = Console(file=sys.stderr, stderr=True)
 APP = App(help="Extract Word comments into inline CriticMarkup Markdown.")
 LOGGER = logging.getLogger(__name__)
+METRICS_LOCK = threading.Lock()
+OPERATION_OUTCOME_COUNTS: Counter[tuple[str, str]] = Counter()
+OPERATION_DURATION_TOTALS_MS: Counter[str] = Counter()
 
 
 class UserFacingError(Exception):
@@ -88,16 +94,23 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
         the error and exits with status 2.
 
     """
+    validation_started_at = time.perf_counter()
     validated_input = _validate_input_path(input_docx)
     if output is not None:
         _validate_output_path(validated_input, output)
-    _log_event("validation", "success")
+    _log_event(
+        "validation",
+        "success",
+        {"duration_ms": _duration_ms(validation_started_at)},
+    )
+    extraction_started_at = time.perf_counter()
     result = extract_document(validated_input)
     _log_event(
         "extraction",
         "success",
         {
             "comment_count": len(result.document.comments),
+            "duration_ms": _duration_ms(extraction_started_at),
             "warning_count": len(result.warnings),
         },
     )
@@ -106,19 +119,31 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     if output is None:
         sys.stdout.write(markdown)
     else:
+        output_write_started_at = time.perf_counter()
         _write_output_atomically(output, markdown)
-        _log_event("output_write", "success")
+        _log_event(
+            "output_write",
+            "success",
+            {"duration_ms": _duration_ms(output_write_started_at)},
+        )
         _print_success(output, len(result.document.comments), len(result.warnings))
 
     if result.warnings:
+        warning_summary_started_at = time.perf_counter()
         _log_event(
-            "warning_summary", "reported", {"warning_count": len(result.warnings)}
+            "warning_summary",
+            "reported",
+            {
+                "duration_ms": _duration_ms(warning_summary_started_at),
+                "warning_count": len(result.warnings),
+            },
         )
         _print_warning_summary(result.warnings)
 
 
 def main(tokens: cabc.Iterable[str] | None = None) -> None:
     """Run the command-line application."""
+    command_started_at = time.perf_counter()
     try:
         APP(
             tokens=tokens,
@@ -128,14 +153,39 @@ def main(tokens: cabc.Iterable[str] | None = None) -> None:
             print_error=False,
         )
     except UserFacingError as error:
-        _log_event(error.operation, "failure", {"error": type(error).__name__})
+        _log_event(
+            error.operation,
+            "failure",
+            {
+                "duration_ms": _duration_ms(command_started_at),
+                "error": type(error).__name__,
+                "error_category": "user_facing",
+            },
+        )
         _print_error(str(error))
         raise SystemExit(2) from error
     except ExtractionError as error:
-        _log_event("extraction", "failure", {"error": type(error).__name__})
+        _log_event(
+            "extraction",
+            "failure",
+            {
+                "duration_ms": _duration_ms(command_started_at),
+                "error": type(error).__name__,
+                "error_category": "extraction",
+            },
+        )
         _print_error(str(error))
         raise SystemExit(2) from error
     except CycloptsError as error:
+        _log_event(
+            "argument_parsing",
+            "failure",
+            {
+                "duration_ms": _duration_ms(command_started_at),
+                "error": type(error).__name__,
+                "error_category": "argument_parsing",
+            },
+        )
         _print_error(str(error))
         raise SystemExit(2) from error
 
@@ -221,11 +271,23 @@ def _log_event(
     outcome: str,
     details: cabc.Mapping[str, object] | None = None,
 ) -> None:
-    """Emit a bounded structured event without document payload data."""
+    """Emit a bounded event with counters and duration metrics."""
     fields: dict[str, object] = {"operation": operation, "outcome": outcome}
     if details is not None:
         fields.update(details)
+    duration_ms = fields.get("duration_ms")
+    with METRICS_LOCK:
+        OPERATION_OUTCOME_COUNTS[operation, outcome] += 1
+        fields["operation_count"] = OPERATION_OUTCOME_COUNTS[operation, outcome]
+        if isinstance(duration_ms, int | float):
+            OPERATION_DURATION_TOTALS_MS[operation] += duration_ms
+            fields["duration_total_ms"] = OPERATION_DURATION_TOTALS_MS[operation]
     LOGGER.info("CLI operation completed", extra=fields)
+
+
+def _duration_ms(started_at: float) -> float:
+    """Return elapsed monotonic time in milliseconds."""
+    return (time.perf_counter() - started_at) * 1000
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -373,8 +373,9 @@ make nixie
 
 ## Approval gate
 
-This document is a draft only. Do not start Milestone 1 implementation until
-the user explicitly approves the plan or requests edits to it.
+Approval was granted on 2026-04-09, and implementation is complete. This gate is
+closed; future changes must update this living plan and follow the repository
+quality gates.
 
 ## Progress
 

@@ -119,6 +119,37 @@ def test_main_presents_extraction_errors_cleanly(
     )
 
 
+def test_main_records_cyclopts_failures_with_a_stable_category(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Argument parser failures should have a bounded observability category."""
+
+    def fail_app(**_kwargs: object) -> typ.NoReturn:
+        """Simulate a command-line parsing failure."""
+        message = "invalid arguments"
+        raise cli.CycloptsError(message)
+
+    monkeypatch.setattr(cli, "APP", fail_app)
+    monkeypatch.setattr(cli, "_print_error", lambda _message: None)
+
+    with (
+        caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"),
+        pytest.raises(SystemExit, match="2"),
+    ):
+        cli.main([])
+
+    assert getattr(caplog.records[0], "operation", None) == "argument_parsing", (
+        "a parsing failure should identify the argument-parsing operation"
+    )
+    assert getattr(caplog.records[0], "error_category", None) == "argument_parsing", (
+        "a parsing failure should expose a stable error category"
+    )
+    assert getattr(caplog.records[0], "duration_ms", None) is not None, (
+        "a parsing failure should include its command duration metric"
+    )
+
+
 def test_extract_comments_emits_bounded_structured_events(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -140,3 +171,30 @@ def test_extract_comments_emits_bounded_structured_events(
     assert all(
         str(input_path) not in record.getMessage() for record in caplog.records
     ), "structured events should not include raw input paths"
+
+
+def test_extract_comments_records_warning_metrics(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Warnings should include bounded counts and duration metrics."""
+    input_path = build_fixture("table-document", tmp_path / "input.docx")
+    output_path = tmp_path / "output.md"
+
+    with caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"):
+        cli.extract_comments(input_path, output_path)
+
+    warning_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "operation", None) == "warning_summary"
+    )
+    assert getattr(warning_record, "warning_count", None) == 1, (
+        "the warning summary metric should count the unsupported table warning"
+    )
+    assert getattr(warning_record, "operation_count", None) is not None, (
+        "the warning summary should include an operation-outcome counter"
+    )
+    assert getattr(warning_record, "duration_ms", None) is not None, (
+        "the warning summary should include a duration metric"
+    )
