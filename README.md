@@ -38,6 +38,7 @@ docx-comment-extractor INPUT.docx --output output.md
 ## Documentation
 
 - [Users' guide](docs/users-guide.md)
+- [v0.1.0 migration guide](docs/v0.1.0-migration-guide.md)
 - [Developers' guide](docs/developers-guide.md)
 - [Comment extraction design](docs/comment-extraction-design.md)
 - [Execution plan](docs/execplans/comment-extractor-foundation.md)

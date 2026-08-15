@@ -20,6 +20,32 @@ Run the module entry point directly as well:
 python -m docx_comment_extractor.cli INPUT.docx
 ```
 
+## Python API
+
+The package exports `ExtractionError`, `extract_document`, and
+`render_document` for applications that need to process documents in Python.
+`extract_document` returns a result containing the normalized document and any
+non-fatal warnings. Pass the document to `render_document` to produce Markdown:
+
+```python
+from pathlib import Path
+
+from docx_comment_extractor import (
+    ExtractionError,
+    extract_document,
+    render_document,
+)
+
+try:
+    result = extract_document(Path("draft.docx"))
+except ExtractionError as error:
+    print(error)
+else:
+    print(render_document(result.document))
+    for warning in result.warnings:
+        print(f"{warning.code}: {warning.message}")
+```
+
 ## Writing to standard output
 
 When `--output` is omitted, the extractor writes Markdown to standard output
@@ -37,6 +63,10 @@ a short success summary to standard error.
 ```bash
 docx-comment-extractor draft.docx --output draft.md
 ```
+
+File output is written through a same-directory temporary file and atomically
+replaced. An existing output file remains unchanged if writing or replacement
+fails. The CLI rejects an output path that aliases the input document.
 
 ## Output format
 
