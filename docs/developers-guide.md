@@ -97,6 +97,14 @@ exception class name as `error`; successful extraction and warning summaries
 may add `comment_count` and `warning_count`. Operations cover validation,
 extraction, warning reporting, and output writes.
 
-Events must not include document text, comment bodies, rendered Markdown, or
-raw filesystem paths. This bounded schema makes decision and failure points
-observable without leaking source material.
+The process also maintains bounded in-process counters by operation and
+outcome, together with monotonic duration totals. Failure events use stable
+categories, including `argument_parsing`, so consumers do not need to match
+free-form exception text. These counters and durations are process-local and
+are not persisted.
+
+Events and metrics must not include document text, comment bodies, rendered
+Markdown, or raw filesystem paths. This bounded schema makes decision and
+failure points observable without leaking source material. Logging remains
+unconfigured by default: the package installs no handler, formatter, or
+logging level.

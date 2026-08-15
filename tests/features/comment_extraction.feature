@@ -21,6 +21,18 @@ Feature: Extract inline comments from Word documents
     And standard output is empty
     And standard error contains "Wrote Markdown"
 
+  Scenario: Report warnings for unsupported table content
+    Given a "table-document" fixture document
+    When I run the extractor CLI on the document
+    Then the command exits successfully
+    And standard error contains "Completed with 1 warning"
+
+  Scenario: Report an unavailable output destination cleanly
+    Given a "simple-comment" fixture document
+    When I run the extractor CLI with an unavailable output file
+    Then the command exits with an error
+    And standard error contains "Could not write the Markdown output file"
+
   Scenario: Reject a missing input path
     Given a missing fixture document path
     When I run the extractor CLI on the document
