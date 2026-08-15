@@ -482,6 +482,9 @@ the user explicitly approves the plan or requests edits to it.
   outcome, error-class, and count fields. Exclude source payloads and raw paths.
 - 2026-07-23: Recommend future property-based tests for balanced cross-paragraph
   ranges and CriticMarkup escaping without asserting false idempotence.
+- 2026-08-15: Use same-directory temporary files and atomic replacement for
+  output writes; the delivered outcome preserves an existing output file when
+  writing or replacement fails.
 
 ## Outcomes & Retrospective
 

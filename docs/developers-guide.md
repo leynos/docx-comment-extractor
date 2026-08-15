@@ -38,7 +38,9 @@ whilst the repository-managed `ty` tool provides static type checking.
 command validates the input and any output destination before extraction. It
 then extracts a normalized model, renders Markdown, and writes either to
 standard output or the requested file. Expected validation, extraction, and
-write failures become concise user-facing errors with exit status 2.
+write failures become concise user-facing errors with exit status 2. File
+output is written through a same-directory temporary file and atomically
+replaced, so a failed write leaves an existing output file unchanged.
 
 `extract_document` accepts an injectable `DocumentLoader`. The default loader
 is the only boundary that opens a package through `python-docx`. Known package
