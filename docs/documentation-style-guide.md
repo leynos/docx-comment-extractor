@@ -281,7 +281,7 @@ YYYY-MM-DD.
 
 <Describe the situation, constraints, and the question being addressed.>
 
-## Decision Drivers
+## Decision drivers
 
 - <Driver 1>
 - <Driver 2>
