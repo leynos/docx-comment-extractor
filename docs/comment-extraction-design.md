@@ -76,6 +76,11 @@ The first release only extracts top-level paragraphs and headings. When the
 extractor encounters a top-level table, it skips the table content and emits a
 warning. Footnotes, text boxes, tracked changes, and images are not yet handled.
 
+Both supported entry points—the CLI and `extract_document`—enforce a 20 MiB
+maximum for the on-disk `.docx` input package before extraction begins. The
+bound applies to the input package only; rendered Markdown and output files
+have no corresponding size limit in this release.
+
 ## Testing strategy
 
 The test suite combines three layers:
@@ -107,12 +112,15 @@ decisions as structured standard-library logging events. Every event contains
 `error` or bounded `comment_count` and `warning_count` values. No event contains
 document text, comment bodies, rendered Markdown, or raw filesystem paths.
 
-The process maintains bounded in-process counters by operation and outcome,
-plus monotonic duration totals. Failure events use stable categories, including
-`argument_parsing`, rather than requiring consumers to match free-form
-exception text. These counters and durations are process-local and are not
-persisted. They contain no document text, comment bodies, rendered Markdown, or
-raw filesystem paths.
+Each CLI invocation owns an injected `OperationMetrics` instance. It maintains
+bounded counters by operation and outcome plus monotonic duration totals, with
+lock-protected records for concurrent callers. `reset()` clears an owner for
+deterministic reuse, and `snapshot()` returns a thread-safe copy. The default
+command path creates a fresh owner per invocation, so metric state is not
+shared across invocations or persisted. Failure events use stable categories,
+including `argument_parsing`, rather than requiring consumers to match
+free-form exception text. Metrics contain no document text, comment bodies,
+rendered Markdown, or raw filesystem paths.
 
 File output uses a same-directory temporary file and atomic replacement, so a
 failed write leaves an existing output file unchanged.
