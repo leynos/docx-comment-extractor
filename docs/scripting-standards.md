@@ -74,7 +74,8 @@ def main(
 ):
     project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
-    dist.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
         tag = f"v{version}"
@@ -130,7 +131,8 @@ def main(
 ):
     project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
-    dist.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
         tag = f"v{version}"
@@ -327,7 +329,8 @@ def main(
 ):
     project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
-    dist.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
         tag = f"v{version}"
@@ -381,6 +384,7 @@ def test_reads_env_and_defaults(monkeypatch, capsys, tmp_path):
 
     # Assert
     assert '"version": "1.2.3"' in captured.out
+    assert not (tmp_path / "dist" / "demo").exists()
 
 
 def test_patch_python_dependency(mocker):
@@ -407,10 +411,12 @@ def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     # Mock external command behaviour
+    cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(stdout="")
     cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=0)
 
     # Run the code under test while shims are active
     cmd_mox.replay()
+    local["git"]["tag", "--list", "v1.2.3"]()
     local["git"]["tag", "v1.2.3"]()
     cmd_mox.verify()
 
@@ -418,16 +424,31 @@ def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
 def test_git_tag_failure_surface_error(cmd_mox, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
+    cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(stdout="")
     cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=1, stderr="denied")
 
     cmd_mox.replay()
     try:
+        local["git"]["tag", "--list", "v1.2.3"]()
         local["git"]["tag", "v1.2.3"]()  # raises due to non‑zero rc
         assert False, "expected ProcessExecutionError"
     except Exception as exc:
         assert "Command exited with code" in str(exc)
     finally:
         cmd_mox.verify()
+
+
+def test_git_tag_existing_is_a_noop(cmd_mox, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(
+        stdout="v1.2.3\n"
+    )
+
+    cmd_mox.replay()
+    assert local["git"]["tag", "--list", "v1.2.3"]() == "v1.2.3\n"
+    # No tag-creation mock is registered: verify rejects an unexpected write.
+    cmd_mox.verify()
 ```
 
 ### Spies and passthrough capture (turn real calls into fixtures)

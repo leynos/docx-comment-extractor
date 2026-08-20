@@ -40,7 +40,10 @@ then extracts a normalized model, renders Markdown, and writes either to
 standard output or the requested file. Expected validation, extraction, and
 write failures become concise user-facing errors with exit status 2. File
 output is written through a same-directory temporary file and atomically
-replaced, so a failed write leaves an existing output file unchanged.
+replaced, so a failed write leaves an existing output file unchanged. Both
+supported entry points—the CLI and `extract_document`—reject an on-disk input
+package larger than 20 MiB before extraction; this bound applies to the
+`.docx` input package, not rendered Markdown or output files.
 
 `extract_document` accepts an injectable `DocumentLoader`. The default loader
 is the only boundary that opens a package through `python-docx`. Known package
@@ -97,11 +100,15 @@ exception class name as `error`; successful extraction and warning summaries
 may add `comment_count` and `warning_count`. Operations cover validation,
 extraction, warning reporting, and output writes.
 
-The process also maintains bounded in-process counters by operation and
-outcome, together with monotonic duration totals. Failure events use stable
-categories, including `argument_parsing`, so consumers do not need to match
-free-form exception text. These counters and durations are process-local and
-are not persisted.
+Each CLI invocation owns an injected `OperationMetrics` instance, which keeps
+bounded counters by operation and outcome together with monotonic duration
+totals. Records are protected by a lock for concurrent callers. `reset()`
+clears an owner for deterministic reuse, and `snapshot()` returns a
+thread-safe copy. The default command path creates a fresh owner per
+invocation, so invocations do not share metric state; metrics are not
+persisted. Failure events use stable categories, including
+`argument_parsing`, so consumers do not need to match free-form exception
+text.
 
 Events and metrics must not include document text, comment bodies, rendered
 Markdown, or raw filesystem paths. This bounded schema makes decision and

@@ -22,6 +22,8 @@ from .models import (
     heading_level_for_style,
 )
 
+MAX_INPUT_BYTES = 20 * 1024 * 1024
+
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
@@ -85,6 +87,9 @@ def extract_document(
         If the document loader cannot open or decode the Word package.
 
     """
+    if _is_oversized_package(path):
+        message = "Input document is too large; maximum size is 20 MiB."
+        raise ExtractionError(message)
     try:
         document = document_loader(path)
     except (BadZipFile, KeyError, OSError, PackageNotFoundError, ValueError) as error:
@@ -96,6 +101,14 @@ def extract_document(
         document=DocumentModel(blocks=tuple(blocks), comments=tuple(comments)),
         warnings=tuple(warnings),
     )
+
+
+def _is_oversized_package(path: Path) -> bool:
+    """Return whether a readable package path exceeds the supported size limit."""
+    try:
+        return path.stat().st_size > MAX_INPUT_BYTES
+    except OSError:
+        return False
 
 
 def _extract_comments(document: WordDocument) -> list[Comment]:
