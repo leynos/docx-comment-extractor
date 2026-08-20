@@ -87,6 +87,11 @@ paragraphs in Markdown.
 User-facing validation failures, such as a missing input path or a non-`.docx`
 extension, are reported through `rich` panels and cause a non-zero exit.
 
+Before extraction, both supported entry points—the CLI and
+`extract_document`—reject an on-disk `.docx` package larger than 20 MiB. This
+bound applies to the input package only; rendered Markdown and the selected
+output destination are not subject to this limit.
+
 Unsupported top-level tables are skipped with a warning rather than failing the
 whole extraction. The current release does not yet extract tables, footnotes,
 tracked changes, text boxes, or images.

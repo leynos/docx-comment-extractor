@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import sys
@@ -17,8 +18,9 @@ from cyclopts import App
 from cyclopts.exceptions import CycloptsError
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
-from .extractor import ExtractionError, extract_document
+from .extractor import MAX_INPUT_BYTES, ExtractionError, extract_document
 from .renderer import render_document
 
 if typ.TYPE_CHECKING:
@@ -28,9 +30,65 @@ STDOUT_CONSOLE = Console(file=sys.stdout)
 STDERR_CONSOLE = Console(file=sys.stderr, stderr=True)
 APP = App(help="Extract Word comments into inline CriticMarkup Markdown.")
 LOGGER = logging.getLogger(__name__)
-METRICS_LOCK = threading.Lock()
-OPERATION_OUTCOME_COUNTS: Counter[tuple[str, str]] = Counter()
-OPERATION_DURATION_TOTALS_MS: Counter[str] = Counter()
+
+
+@dataclasses.dataclass(frozen=True)
+class MetricsSnapshot:
+    """An immutable copy of the metrics collected by one CLI invocation."""
+
+    operation_counts: dict[tuple[str, str], int]
+    duration_totals_ms: dict[str, float]
+
+
+class OperationMetrics:
+    """Own bounded metrics for one CLI invocation or injected test scope."""
+
+    def __init__(self) -> None:
+        """Create an empty, lock-protected metrics owner."""
+        self._lock = threading.Lock()
+        self._operation_counts: Counter[tuple[str, str]] = Counter()
+        self._duration_totals_ms: Counter[str] = Counter()
+
+    def record(
+        self,
+        operation: str,
+        outcome: str,
+        duration_ms: object,
+    ) -> dict[str, int | float]:
+        """Record an event and return its bounded metric fields."""
+        with self._lock:
+            self._operation_counts[operation, outcome] += 1
+            fields: dict[str, int | float] = {
+                "operation_count": self._operation_counts[operation, outcome]
+            }
+            match duration_ms:
+                case int() | float():
+                    self._duration_totals_ms[operation] += duration_ms
+                    fields["duration_total_ms"] = self._duration_totals_ms[operation]
+        return fields
+
+    def reset(self) -> None:
+        """Clear all counters so the owner can be reused deterministically."""
+        with self._lock:
+            self._operation_counts.clear()
+            self._duration_totals_ms.clear()
+
+    def snapshot(self) -> MetricsSnapshot:
+        """Return a thread-safe copy of this owner's current metric values."""
+        with self._lock:
+            return MetricsSnapshot(
+                operation_counts=dict(self._operation_counts),
+                duration_totals_ms=dict(self._duration_totals_ms),
+            )
+
+
+@dataclasses.dataclass(frozen=True)
+class _RenderedDocument:
+    """Keep rendering results separate from persistence and terminal reporting."""
+
+    markdown: str
+    comment_count: int
+    warnings: cabc.Sequence[object]
 
 
 class UserFacingError(Exception):
@@ -55,6 +113,11 @@ class UserFacingError(Exception):
     def not_a_file(cls, path: Path) -> UserFacingError:
         """Build an error for non-file inputs."""
         return cls(f"Input path '{path}' is not a file.")
+
+    @classmethod
+    def input_too_large(cls) -> UserFacingError:
+        """Build an error for Word packages that exceed the input limit."""
+        return cls("Input document is too large; maximum size is 20 MiB.")
 
     @classmethod
     def output_alias(cls) -> UserFacingError:
@@ -94,11 +157,45 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
         the error and exits with status 2.
 
     """
+    _run_extraction(
+        input_docx,
+        output,
+        metrics=OperationMetrics(),
+        output_writer=_write_output_atomically,
+    )
+
+
+def _run_extraction(
+    input_docx: Path,
+    output: Path | None,
+    *,
+    metrics: OperationMetrics,
+    output_writer: typ.Callable[[Path, str], None],
+) -> None:
+    """Orchestrate extraction with injectable metrics and file persistence."""
+    rendered = _prepare_rendered_document(input_docx, output, metrics=metrics)
+    _write_rendered_document(
+        output,
+        rendered,
+        metrics=metrics,
+        output_writer=output_writer,
+    )
+    _report_warnings(rendered.warnings, metrics=metrics)
+
+
+def _prepare_rendered_document(
+    input_docx: Path,
+    output: Path | None,
+    *,
+    metrics: OperationMetrics,
+) -> _RenderedDocument:
+    """Validate, extract, and render a document before any persistence."""
     validation_started_at = time.perf_counter()
     validated_input = _validate_input_path(input_docx)
     if output is not None:
         _validate_output_path(validated_input, output)
     _log_event(
+        metrics,
         "validation",
         "success",
         {"duration_ms": _duration_ms(validation_started_at)},
@@ -106,6 +203,7 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     extraction_started_at = time.perf_counter()
     result = extract_document(validated_input)
     _log_event(
+        metrics,
         "extraction",
         "success",
         {
@@ -114,36 +212,84 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
             "warning_count": len(result.warnings),
         },
     )
-    markdown = f"{render_document(result.document)}\n"
+    return _RenderedDocument(
+        markdown=f"{render_document(result.document)}\n",
+        comment_count=len(result.document.comments),
+        warnings=result.warnings,
+    )
 
+
+def _write_rendered_document(
+    output: Path | None,
+    rendered: _RenderedDocument,
+    *,
+    metrics: OperationMetrics,
+    output_writer: typ.Callable[[Path, str], None],
+) -> None:
+    """Write rendered Markdown to standard output or an injected file writer."""
     if output is None:
-        sys.stdout.write(markdown)
+        sys.stdout.write(rendered.markdown)
     else:
         output_write_started_at = time.perf_counter()
-        _write_output_atomically(output, markdown)
+        output_writer(output, rendered.markdown)
         _log_event(
+            metrics,
             "output_write",
             "success",
             {"duration_ms": _duration_ms(output_write_started_at)},
         )
-        _print_success(output, len(result.document.comments), len(result.warnings))
+        _print_success(output, rendered.comment_count, len(rendered.warnings))
 
-    if result.warnings:
+
+def _report_warnings(
+    warnings: cabc.Sequence[object],
+    *,
+    metrics: OperationMetrics,
+) -> None:
+    """Report non-fatal warnings after output has completed."""
+    if warnings:
         warning_summary_started_at = time.perf_counter()
         _log_event(
+            metrics,
             "warning_summary",
             "reported",
             {
                 "duration_ms": _duration_ms(warning_summary_started_at),
-                "warning_count": len(result.warnings),
+                "warning_count": len(warnings),
             },
         )
-        _print_warning_summary(result.warnings)
+        _print_warning_summary(warnings)
 
 
-def main(tokens: cabc.Iterable[str] | None = None) -> None:
-    """Run the command-line application."""
+def main(
+    tokens: cabc.Iterable[str] | None = None,
+    *,
+    metrics: OperationMetrics | None = None,
+) -> None:
+    """Run the command-line application.
+
+    Parameters
+    ----------
+    tokens
+        Optional command-line argument iterable. ``None`` makes Cyclopts read
+        arguments from the process command line.
+    metrics
+        Optional per-invocation metrics owner for terminal failure events.
+
+    Returns
+    -------
+    None
+        The command returns normally after successful Cyclopts dispatch.
+
+    Raises
+    ------
+    SystemExit
+        With status 2 after a handled validation, extraction, or argument
+        parsing failure.
+
+    """
     command_started_at = time.perf_counter()
+    active_metrics = metrics or OperationMetrics()
     try:
         APP(
             tokens=tokens,
@@ -154,6 +300,7 @@ def main(tokens: cabc.Iterable[str] | None = None) -> None:
         )
     except UserFacingError as error:
         _log_event(
+            active_metrics,
             error.operation,
             "failure",
             {
@@ -166,6 +313,7 @@ def main(tokens: cabc.Iterable[str] | None = None) -> None:
         raise SystemExit(2) from error
     except ExtractionError as error:
         _log_event(
+            active_metrics,
             "extraction",
             "failure",
             {
@@ -178,6 +326,7 @@ def main(tokens: cabc.Iterable[str] | None = None) -> None:
         raise SystemExit(2) from error
     except CycloptsError as error:
         _log_event(
+            active_metrics,
             "argument_parsing",
             "failure",
             {
@@ -198,6 +347,8 @@ def _validate_input_path(path: Path) -> Path:
         raise UserFacingError.missing_file(path)
     if not path.is_file():
         raise UserFacingError.not_a_file(path)
+    if path.stat().st_size > MAX_INPUT_BYTES:
+        raise UserFacingError.input_too_large()
     return path
 
 
@@ -226,8 +377,8 @@ def _write_output_atomically(output: Path, markdown: str) -> None:
             suffix=".tmp",
             delete=False,
         ) as temporary_file:
-            temporary_file.write(markdown)
             temporary_path = Path(temporary_file.name)
+            temporary_file.write(markdown)
         os.replace(  # noqa: PTH105  # Required atomic-replacement primitive.
             temporary_path,
             output,
@@ -241,7 +392,9 @@ def _write_output_atomically(output: Path, markdown: str) -> None:
 
 def _print_error(message: str) -> None:
     """Render a user-facing error on standard error."""
-    STDERR_CONSOLE.print(Panel.fit(message, title="Error", border_style="red"))
+    STDERR_CONSOLE.print(
+        Panel.fit(_safe_terminal_text(message), title="Error", border_style="red")
+    )
 
 
 def _print_success(output: Path, comment_count: int, warning_count: int) -> None:
@@ -250,7 +403,7 @@ def _print_success(output: Path, comment_count: int, warning_count: int) -> None
         f"Wrote Markdown to {output} "
         f"({comment_count} comments, {warning_count} warnings)."
     )
-    STDERR_CONSOLE.print(message, style="green")
+    STDERR_CONSOLE.print(_safe_terminal_text(message), style="green")
 
 
 def _print_warning_summary(warnings: cabc.Sequence[object]) -> None:
@@ -267,6 +420,7 @@ def _print_warning_summary(warnings: cabc.Sequence[object]) -> None:
 
 
 def _log_event(
+    metrics: OperationMetrics,
     operation: str,
     outcome: str,
     details: cabc.Mapping[str, object] | None = None,
@@ -275,19 +429,22 @@ def _log_event(
     fields: dict[str, object] = {"operation": operation, "outcome": outcome}
     if details is not None:
         fields.update(details)
-    duration_ms = fields.get("duration_ms")
-    with METRICS_LOCK:
-        OPERATION_OUTCOME_COUNTS[operation, outcome] += 1
-        fields["operation_count"] = OPERATION_OUTCOME_COUNTS[operation, outcome]
-        if isinstance(duration_ms, int | float):
-            OPERATION_DURATION_TOTALS_MS[operation] += duration_ms
-            fields["duration_total_ms"] = OPERATION_DURATION_TOTALS_MS[operation]
+    fields.update(metrics.record(operation, outcome, fields.get("duration_ms")))
     LOGGER.info("CLI operation completed", extra=fields)
 
 
 def _duration_ms(started_at: float) -> float:
     """Return elapsed monotonic time in milliseconds."""
     return (time.perf_counter() - started_at) * 1000
+
+
+def _safe_terminal_text(message: str) -> Text:
+    """Return literal text with terminal control characters made visible."""
+    sanitized = "".join(
+        character if character.isprintable() else f"\\x{ord(character):02x}"
+        for character in message
+    )
+    return Text(sanitized)
 
 
 if __name__ == "__main__":  # pragma: no cover
