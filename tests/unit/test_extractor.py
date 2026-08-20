@@ -8,6 +8,7 @@ import typing as typ
 import pytest
 from docx import Document
 
+from docx_comment_extractor import extractor
 from docx_comment_extractor.extractor import ExtractionError, extract_document
 from tests.support_documents import build_fixture
 
@@ -47,6 +48,23 @@ def test_extract_document_wraps_loader_failures(tmp_path: Path) -> None:
 
     with pytest.raises(ExtractionError, match="Could not extract the Word document"):
         extract_document(document_path, document_loader=fail_to_load)
+
+
+def test_extract_document_rejects_oversized_packages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public API should reject oversized packages before loading them."""
+    document_path = tmp_path / "oversized.docx"
+    document_path.write_bytes(b"xx")
+    monkeypatch.setattr(extractor, "MAX_INPUT_BYTES", 1)
+
+    def fail_if_loaded(path: Path) -> typ.NoReturn:
+        del path
+        pytest.fail("oversized packages should be rejected before loader invocation")
+
+    with pytest.raises(ExtractionError, match="too large"):
+        extract_document(document_path, document_loader=fail_if_loaded)
 
 
 def test_extract_document_builds_simple_model(tmp_path: Path) -> None:
