@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import datetime as dt
 import typing as typ
+import zlib
 
 import pytest
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from lxml import etree
+from lxml.etree import XMLSyntaxError
 
 from docx_comment_extractor import extractor
-from docx_comment_extractor.extractor import ExtractionError, extract_document
+from docx_comment_extractor.extractor import (
+    ExtractionError,
+    _extract_paragraph_block,
+    extract_document,
+)
+from docx_comment_extractor.renderer import render_document
 from tests.support_documents import build_fixture
 
 if typ.TYPE_CHECKING:
@@ -39,12 +49,48 @@ def test_extract_document_uses_injected_document_loader(tmp_path: Path) -> None:
 def test_extract_document_wraps_loader_failures(tmp_path: Path) -> None:
     """Loader failures should cross the public API as an extraction error."""
     document_path = tmp_path / "broken.docx"
+    document_path.touch()
 
     def fail_to_load(path: Path) -> typ.NoReturn:
         """Simulate an unreadable document package."""
         del path
         message = "storage detail"
         raise OSError(message)
+
+    with pytest.raises(ExtractionError, match="Could not extract the Word document"):
+        extract_document(document_path, document_loader=fail_to_load)
+
+
+def _create_xml_syntax_error() -> XMLSyntaxError:
+    """Produce the parser-originated XML exception used by a corrupt package."""
+    try:
+        etree.fromstring(b"<")
+    except XMLSyntaxError as error:
+        return error
+    message = "The malformed XML fixture should raise XMLSyntaxError."
+    raise AssertionError(message)
+
+
+@pytest.mark.parametrize(
+    "failure_factory",
+    [
+        _create_xml_syntax_error,
+        lambda: zlib.error("invalid compressed payload"),
+        lambda: EOFError("unexpected end of package"),
+        lambda: RuntimeError("unexpected package state"),
+    ],
+)
+def test_extract_document_wraps_corrupt_package_failures(
+    tmp_path: Path,
+    failure_factory: typ.Callable[[], Exception],
+) -> None:
+    """Known corrupt-package errors should not cross the public API boundary."""
+    document_path = tmp_path / "corrupt.docx"
+    document_path.touch()
+
+    def fail_to_load(path: Path) -> typ.NoReturn:
+        del path
+        raise failure_factory()
 
     with pytest.raises(ExtractionError, match="Could not extract the Word document"):
         extract_document(document_path, document_loader=fail_to_load)
@@ -128,6 +174,52 @@ def test_extract_document_supports_multi_run_ranges(tmp_path: Path) -> None:
     )
     assert paragraph_fragments[3].end_comment_ids == ("0",), (
         "the last commented run should close the multi-run boundary"
+    )
+
+
+def test_extract_document_preserves_inline_controls_in_ranges(
+    tmp_path: Path,
+) -> None:
+    """Tabs and line breaks should survive inside and outside comment ranges."""
+    document_path = build_fixture("inline-controls", tmp_path / "controls.docx")
+
+    result = extract_document(document_path)
+    fragments = result.document.blocks[0].fragments
+
+    assert [fragment.text for fragment in fragments] == [
+        "Outside\t\n",
+        "Inside\t\n",
+        "again\n",
+        "After\t\n",
+    ], "the extracted model should preserve tabs and both line-break elements"
+    assert fragments[1].start_comment_ids == ("0",), (
+        "the first control-bearing fragment should open the comment range"
+    )
+    assert fragments[2].end_comment_ids == ("0",), (
+        "the final control-bearing fragment should close the comment range"
+    )
+    assert "{==Inside\t\nagain\n==}" in render_document(result.document), (
+        "the renderer should preserve controls inside the CriticMarkup highlight"
+    )
+    assert render_document(result.document).startswith("Outside\t\n"), (
+        "the renderer should preserve controls outside the comment range"
+    )
+
+
+def test_extract_paragraph_block_accumulates_many_end_markers() -> None:
+    """A fragment should collect many end markers without repeated tuple copying."""
+    document = Document()
+    paragraph = document.add_paragraph("marked")
+    for marker_id in range(128):
+        marker = OxmlElement("w:commentRangeEnd")
+        marker.set(qn("w:id"), str(marker_id))
+        # The fixture requires an OOXML-only comment boundary marker.
+        paragraph._p.append(marker)
+
+    block = _extract_paragraph_block(paragraph)
+
+    assert block.fragments[0].end_comment_ids == tuple(map(str, range(128))), (
+        "the paragraph block should retain every end marker in document order"
     )
 
 

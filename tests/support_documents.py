@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing as typ
 
 from docx import Document
+from docx.oxml import OxmlElement
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -189,6 +190,44 @@ def build_comment_normalization_docx(path: Path) -> Path:
     return path
 
 
+def build_inline_controls_docx(path: Path) -> Path:
+    """Create a document with tabs and line breaks around a comment range.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
+    document = Document()
+    paragraph = document.add_paragraph()
+    outside_before = paragraph.add_run("Outside")
+    outside_before.add_tab()
+    outside_before.add_break()
+    first_commented_run = paragraph.add_run("Inside")
+    first_commented_run.add_tab()
+    first_commented_run.add_break()
+    last_commented_run = paragraph.add_run("again")
+    # The fixture requires an OOXML-only carriage-return element.
+    last_commented_run._r.append(OxmlElement("w:cr"))
+    outside_after = paragraph.add_run("After")
+    outside_after.add_tab()
+    outside_after.add_break()
+    comment = document.add_comment(
+        [first_commented_run, last_commented_run],
+        text="Preserve controls.",
+        author="Control Reviewer",
+    )
+    _set_fixed_timestamp(comment)
+    document.save(str(path))
+    return path
+
+
 def build_fixture(name: str, path: Path) -> Path:
     """Build a named fixture document at ``path``.
 
@@ -212,6 +251,7 @@ def build_fixture(name: str, path: Path) -> Path:
         "table-document": build_table_docx,
         "criticmarkup-literal": build_criticmarkup_literal_docx,
         "comment-normalization": build_comment_normalization_docx,
+        "inline-controls": build_inline_controls_docx,
     }
     return builders[name](path)
 

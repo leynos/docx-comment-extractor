@@ -25,12 +25,14 @@ Documentation changes also require `make markdownlint` and `make nixie`.
 The runtime dependencies have distinct boundary roles:
 
 - `python-docx` loads Word packages and exposes document content.
+- `lxml` provides XML parsing errors for corrupt-package handling.
 - `cyclopts` defines the command-line interface (CLI).
 - `rich` presents user-facing status and error messages.
 
 The development dependency group adds `pytest`, `pytest-bdd`, and `syrupy` for
-unit, behavioural, and snapshot tests. Ruff provides linting and formatting,
-whilst the repository-managed `ty` tool provides static type checking.
+unit, behavioural, and snapshot tests. `lxml-stubs` provides XML typing for
+static analysis. Ruff provides linting and formatting, whilst the
+repository-managed `ty` tool provides static type checking.
 
 ## Command flow
 
