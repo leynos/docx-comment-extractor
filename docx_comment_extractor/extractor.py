@@ -5,12 +5,14 @@ from __future__ import annotations
 import dataclasses as dc
 import datetime as dt
 import typing as typ
+import zlib
 from zipfile import BadZipFile
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from lxml.etree import XMLSyntaxError
 
 from .models import (
     Block,
@@ -87,14 +89,23 @@ def extract_document(
         If the document loader cannot open or decode the Word package.
 
     """
-    if _is_oversized_package(path):
-        message = "Input document is too large; maximum size is 20 MiB."
-        raise ExtractionError(message)
     try:
-        document = document_loader(path)
-    except (BadZipFile, KeyError, OSError, PackageNotFoundError, ValueError) as error:
-        message = "Could not extract the Word document."
-        raise ExtractionError(message) from error
+        is_oversized = _is_oversized_package(path)
+    except (
+        BadZipFile,
+        EOFError,
+        KeyError,
+        OSError,
+        PackageNotFoundError,
+        RuntimeError,
+        ValueError,
+        XMLSyntaxError,
+        zlib.error,
+    ) as error:
+        _raise_extraction_error(error)
+    if is_oversized:
+        _raise_oversized_package()
+    document = _load_document_for_extraction(path, document_loader)
     comments = _extract_comments(document)
     blocks, warnings = _extract_blocks(document)
     return ExtractionResult(
@@ -105,10 +116,40 @@ def extract_document(
 
 def _is_oversized_package(path: Path) -> bool:
     """Return whether a readable package path exceeds the supported size limit."""
+    return path.stat().st_size > MAX_INPUT_BYTES
+
+
+def _raise_oversized_package() -> typ.NoReturn:
+    """Stop extraction when the package exceeds its supported size limit."""
+    message = "Input document is too large; maximum size is 20 MiB."
+    raise ExtractionError(message)
+
+
+def _load_document_for_extraction(
+    path: Path,
+    document_loader: DocumentLoader,
+) -> WordDocument:
+    """Load a package while translating known infrastructure failures."""
     try:
-        return path.stat().st_size > MAX_INPUT_BYTES
-    except OSError:
-        return False
+        return document_loader(path)
+    except (
+        BadZipFile,
+        EOFError,
+        KeyError,
+        OSError,
+        PackageNotFoundError,
+        RuntimeError,
+        ValueError,
+        XMLSyntaxError,
+        zlib.error,
+    ) as error:
+        _raise_extraction_error(error)
+
+
+def _raise_extraction_error(error: Exception) -> typ.NoReturn:
+    """Translate an infrastructure exception at the extraction boundary."""
+    message = "Could not extract the Word document."
+    raise ExtractionError(message) from error
 
 
 def _extract_comments(document: WordDocument) -> list[Comment]:
@@ -173,6 +214,7 @@ def _extract_blocks(
 def _extract_paragraph_block(paragraph: Paragraph) -> Block:
     """Convert a Word paragraph and its comment boundaries into a block."""
     fragments: list[Fragment] = []
+    fragment_end_ids: list[list[str]] = []
     pending_start_ids: list[str] = []
 
     for child in _iter_paragraph_xml_children(paragraph):
@@ -180,14 +222,8 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
             case "commentRangeStart":
                 pending_start_ids.append(_comment_id(child))
             case "commentRangeEnd":
-                if fragments:
-                    fragments[-1] = dc.replace(
-                        fragments[-1],
-                        end_comment_ids=(
-                            *fragments[-1].end_comment_ids,
-                            _comment_id(child),
-                        ),
-                    )
+                if fragment_end_ids:
+                    fragment_end_ids[-1].append(_comment_id(child))
             case _:
                 text = _extract_inline_text(child)
                 if text:
@@ -197,6 +233,7 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
                             start_comment_ids=tuple(pending_start_ids),
                         )
                     )
+                    fragment_end_ids.append([])
                     pending_start_ids.clear()
 
     style_name = paragraph.style.name if paragraph.style is not None else ""
@@ -204,7 +241,12 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
     kind = "heading" if heading_level is not None else "paragraph"
     return Block(
         kind=kind,
-        fragments=tuple(fragments),
+        fragments=tuple(
+            dc.replace(fragment, end_comment_ids=tuple(end_ids))
+            if end_ids
+            else fragment
+            for fragment, end_ids in zip(fragments, fragment_end_ids, strict=True)
+        ),
         heading_level=heading_level,
     )
 
@@ -222,15 +264,13 @@ def _extract_inline_text(element: XmlElement) -> str:
     """Collect text, tabs, and line breaks from an inline XML element."""
     parts: list[str] = []
     for node in element.iter():
-        local_name = _local_name(node)
-        if local_name == "t":
-            parts.append(_node_text(node))
-            continue
-        if local_name == "tab":
-            parts.append("\t")
-            continue
-        if local_name in {"br", "cr"}:
-            parts.append("\n")
+        match _local_name(node):
+            case "t":
+                parts.append(_node_text(node))
+            case "tab":
+                parts.append("\t")
+            case "br" | "cr":
+                parts.append("\n")
     return "".join(parts)
 
 

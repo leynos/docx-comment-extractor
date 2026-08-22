@@ -78,14 +78,35 @@ CriticMarkup highlight followed immediately by a CriticMarkup comment:
 Before {==commented text==}{>>Sam C, 2026-04-09T20:35:31Z: Needs evidence.<<} after.
 ```
 
-Multi-paragraph comment bodies are flattened with ` / `. Comment ranges that
-span multiple paragraphs remain open across the blank line separating the
-paragraphs in Markdown.
+## Comment ranges and metadata
+
+Comment ranges spanning multiple Word runs are reconstructed as one inline
+CriticMarkup highlight. Ranges spanning multiple paragraphs remain open across
+the blank line separating those paragraphs in Markdown. Multi-paragraph
+comment bodies are flattened with ` / `.
+
+Literal CriticMarkup delimiters in source text and comment bodies are escaped
+before rendering, so text such as `{>>literal<<}` remains literal Markdown:
+
+```text
+\{>>literal<<\}
+```
+
+Comment metadata follows these rules:
+
+- Author names are stripped of surrounding whitespace; a blank author is
+  omitted.
+- Naive timestamps are interpreted as UTC. Timezone-aware timestamps are
+  converted to UTC and rendered at second precision as
+  `YYYY-MM-DDTHH:MM:SSZ`.
+- Available author and timestamp metadata precedes the comment body. Missing
+  metadata is omitted without adding placeholder punctuation.
 
 ## Warnings and errors
 
 User-facing validation failures, such as a missing input path or a non-`.docx`
-extension, are reported through `rich` panels and cause a non-zero exit.
+extension, are reported through `rich` panels and cause exit status 2.
+Extraction and output-write failures use the same status.
 
 Before extraction, both supported entry points—the CLI and
 `extract_document`—reject an on-disk `.docx` package larger than 20 MiB. This

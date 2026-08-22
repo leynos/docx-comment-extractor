@@ -91,6 +91,17 @@ class _RenderedDocument:
     warnings: cabc.Sequence[object]
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeDependencies:
+    """Own the narrow runtime seams used by CLI orchestration."""
+
+    metrics: OperationMetrics
+    output_writer: typ.Callable[[Path, str], None]
+    clock: typ.Callable[[], float]
+    input_validator: typ.Callable[[Path], Path]
+    output_validator: typ.Callable[[Path, Path], None]
+
+
 class UserFacingError(Exception):
     """An expected CLI error that should be presented cleanly."""
 
@@ -160,8 +171,13 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     _run_extraction(
         input_docx,
         output,
-        metrics=OperationMetrics(),
-        output_writer=_write_output_atomically,
+        dependencies=_RuntimeDependencies(
+            metrics=OperationMetrics(),
+            output_writer=_write_output_atomically,
+            clock=time.perf_counter,
+            input_validator=_validate_input_path,
+            output_validator=_validate_output_path,
+        ),
     )
 
 
@@ -169,46 +185,56 @@ def _run_extraction(
     input_docx: Path,
     output: Path | None,
     *,
-    metrics: OperationMetrics,
-    output_writer: typ.Callable[[Path, str], None],
+    dependencies: _RuntimeDependencies,
 ) -> None:
     """Orchestrate extraction with injectable metrics and file persistence."""
-    rendered = _prepare_rendered_document(input_docx, output, metrics=metrics)
+    rendered = _prepare_rendered_document(
+        input_docx,
+        output,
+        dependencies=dependencies,
+    )
     _write_rendered_document(
         output,
         rendered,
-        metrics=metrics,
-        output_writer=output_writer,
+        dependencies=dependencies,
     )
-    _report_warnings(rendered.warnings, metrics=metrics)
+    _report_warnings(rendered.warnings, dependencies=dependencies)
 
 
 def _prepare_rendered_document(
     input_docx: Path,
     output: Path | None,
     *,
-    metrics: OperationMetrics,
+    dependencies: _RuntimeDependencies,
 ) -> _RenderedDocument:
     """Validate, extract, and render a document before any persistence."""
-    validation_started_at = time.perf_counter()
-    validated_input = _validate_input_path(input_docx)
+    validation_started_at = dependencies.clock()
+    validated_input = dependencies.input_validator(input_docx)
     if output is not None:
-        _validate_output_path(validated_input, output)
+        dependencies.output_validator(validated_input, output)
     _log_event(
-        metrics,
+        dependencies.metrics,
         "validation",
         "success",
-        {"duration_ms": _duration_ms(validation_started_at)},
+        {
+            "duration_ms": _duration_ms(
+                validation_started_at,
+                clock=dependencies.clock,
+            )
+        },
     )
-    extraction_started_at = time.perf_counter()
+    extraction_started_at = dependencies.clock()
     result = extract_document(validated_input)
     _log_event(
-        metrics,
+        dependencies.metrics,
         "extraction",
         "success",
         {
             "comment_count": len(result.document.comments),
-            "duration_ms": _duration_ms(extraction_started_at),
+            "duration_ms": _duration_ms(
+                extraction_started_at,
+                clock=dependencies.clock,
+            ),
             "warning_count": len(result.warnings),
         },
     )
@@ -223,20 +249,24 @@ def _write_rendered_document(
     output: Path | None,
     rendered: _RenderedDocument,
     *,
-    metrics: OperationMetrics,
-    output_writer: typ.Callable[[Path, str], None],
+    dependencies: _RuntimeDependencies,
 ) -> None:
     """Write rendered Markdown to standard output or an injected file writer."""
     if output is None:
         sys.stdout.write(rendered.markdown)
     else:
-        output_write_started_at = time.perf_counter()
-        output_writer(output, rendered.markdown)
+        output_write_started_at = dependencies.clock()
+        dependencies.output_writer(output, rendered.markdown)
         _log_event(
-            metrics,
+            dependencies.metrics,
             "output_write",
             "success",
-            {"duration_ms": _duration_ms(output_write_started_at)},
+            {
+                "duration_ms": _duration_ms(
+                    output_write_started_at,
+                    clock=dependencies.clock,
+                )
+            },
         )
         _print_success(output, rendered.comment_count, len(rendered.warnings))
 
@@ -244,17 +274,20 @@ def _write_rendered_document(
 def _report_warnings(
     warnings: cabc.Sequence[object],
     *,
-    metrics: OperationMetrics,
+    dependencies: _RuntimeDependencies,
 ) -> None:
     """Report non-fatal warnings after output has completed."""
     if warnings:
-        warning_summary_started_at = time.perf_counter()
+        warning_summary_started_at = dependencies.clock()
         _log_event(
-            metrics,
+            dependencies.metrics,
             "warning_summary",
             "reported",
             {
-                "duration_ms": _duration_ms(warning_summary_started_at),
+                "duration_ms": _duration_ms(
+                    warning_summary_started_at,
+                    clock=dependencies.clock,
+                ),
                 "warning_count": len(warnings),
             },
         )
@@ -265,6 +298,7 @@ def main(
     tokens: cabc.Iterable[str] | None = None,
     *,
     metrics: OperationMetrics | None = None,
+    clock: typ.Callable[[], float] = time.perf_counter,
 ) -> None:
     """Run the command-line application.
 
@@ -275,6 +309,8 @@ def main(
         arguments from the process command line.
     metrics
         Optional per-invocation metrics owner for terminal failure events.
+    clock
+        Monotonic clock used for terminal failure duration metrics.
 
     Returns
     -------
@@ -288,7 +324,7 @@ def main(
         parsing failure.
 
     """
-    command_started_at = time.perf_counter()
+    command_started_at = clock()
     active_metrics = metrics or OperationMetrics()
     try:
         APP(
@@ -304,7 +340,7 @@ def main(
             error.operation,
             "failure",
             {
-                "duration_ms": _duration_ms(command_started_at),
+                "duration_ms": _duration_ms(command_started_at, clock=clock),
                 "error": type(error).__name__,
                 "error_category": "user_facing",
             },
@@ -317,7 +353,7 @@ def main(
             "extraction",
             "failure",
             {
-                "duration_ms": _duration_ms(command_started_at),
+                "duration_ms": _duration_ms(command_started_at, clock=clock),
                 "error": type(error).__name__,
                 "error_category": "extraction",
             },
@@ -330,7 +366,7 @@ def main(
             "argument_parsing",
             "failure",
             {
-                "duration_ms": _duration_ms(command_started_at),
+                "duration_ms": _duration_ms(command_started_at, clock=clock),
                 "error": type(error).__name__,
                 "error_category": "argument_parsing",
             },
@@ -339,23 +375,49 @@ def main(
         raise SystemExit(2) from error
 
 
-def _validate_input_path(path: Path) -> Path:
+def _file_size(path: Path) -> int:
+    """Return the byte size used by input validation."""
+    return path.stat().st_size
+
+
+def _validate_input_path(
+    path: Path,
+    *,
+    file_size: typ.Callable[[Path], int] | None = None,
+) -> Path:
     """Validate and return a readable Word input path."""
-    if path.suffix.lower() != ".docx":
-        raise UserFacingError.invalid_extension(path)
-    if not path.exists():
-        raise UserFacingError.missing_file(path)
-    if not path.is_file():
-        raise UserFacingError.not_a_file(path)
-    if path.stat().st_size > MAX_INPUT_BYTES:
-        raise UserFacingError.input_too_large()
+    active_file_size = file_size or _file_size
+    try:
+        if path.suffix.lower() != ".docx":
+            raise UserFacingError.invalid_extension(path)
+        if not path.exists():
+            raise UserFacingError.missing_file(path)
+        if not path.is_file():
+            raise UserFacingError.not_a_file(path)
+        if active_file_size(path) > MAX_INPUT_BYTES:
+            raise UserFacingError.input_too_large()
+    except OSError as error:
+        message = "Could not inspect the input document path."
+        raise UserFacingError(message) from error
     return path
 
 
-def _validate_output_path(input_docx: Path, output: Path) -> None:
+def _validate_output_path(
+    input_docx: Path,
+    output: Path,
+    *,
+    paths_refer_to_same_file: typ.Callable[[Path, Path], bool] | None = None,
+) -> None:
     """Reject output paths that alias the input document."""
-    if _paths_refer_to_same_file(input_docx, output):
-        raise UserFacingError.output_alias()
+    active_paths_refer_to_same_file = (
+        paths_refer_to_same_file or _paths_refer_to_same_file
+    )
+    try:
+        if active_paths_refer_to_same_file(input_docx, output):
+            raise UserFacingError.output_alias()
+    except OSError as error:
+        message = "Could not inspect the output document path."
+        raise UserFacingError(message) from error
 
 
 def _paths_refer_to_same_file(input_docx: Path, output: Path) -> bool:
@@ -433,9 +495,9 @@ def _log_event(
     LOGGER.info("CLI operation completed", extra=fields)
 
 
-def _duration_ms(started_at: float) -> float:
+def _duration_ms(started_at: float, *, clock: typ.Callable[[], float]) -> float:
     """Return elapsed monotonic time in milliseconds."""
-    return (time.perf_counter() - started_at) * 1000
+    return (clock() - started_at) * 1000
 
 
 def _safe_terminal_text(message: str) -> Text:
