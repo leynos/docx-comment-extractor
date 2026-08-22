@@ -59,12 +59,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
+    { name = "lxml" },
     { name = "python-docx" },
     { name = "rich" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "lxml-stubs" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-bdd" },
@@ -77,12 +79,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cyclopts" },
+    { name = "lxml" },
     { name = "python-docx" },
     { name = "rich" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "lxml-stubs", specifier = ">=0.5.1" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-bdd" },
@@ -161,6 +165,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/68/fcdbb78c8cda81a86e17b31abf103b7e474e474a09fb291a99e7a9b43eb8/lxml-6.0.3-cp314-cp314t-win32.whl", hash = "sha256:bf98f5f87f6484302e7cce4e2ca5af43562902852063d916c3e2f1c115fdce60", size = 3896249, upload-time = "2026-04-09T14:37:41.068Z" },
     { url = "https://files.pythonhosted.org/packages/88/fb/6292681ac4a4223b700569ce98f71662cb07c5a3ade4f346f5f0d5c574cf/lxml-6.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:d3d65e511e4e656ec67b472110f7a72cbf8547ca15f76fe74cffa4e97412a064", size = 4391091, upload-time = "2026-04-09T14:37:43.357Z" },
     { url = "https://files.pythonhosted.org/packages/99/39/a0f486360a6f1b36fd2f5eb62d037652bef503d82b6f853aee6664cdfcac/lxml-6.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:cbc7ce67f85b92db97c92219985432be84dc1ba9a028e68c6933e89551234df2", size = 3816374, upload-time = "2026-04-09T14:37:45.532Z" },
+]
+
+[[package]]
+name = "lxml-stubs"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/da/1a3a3e5d159b249fc2970d73437496b908de8e4716a089c69591b4ffa6fd/lxml-stubs-0.5.1.tar.gz", hash = "sha256:e0ec2aa1ce92d91278b719091ce4515c12adc1d564359dfaf81efa7d4feab79d", size = 14778, upload-time = "2024-01-10T09:37:46.521Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/c9/e0f8e4e6e8a69e5959b06499582dca6349db6769cc7fdfb8a02a7c75a9ae/lxml_stubs-0.5.1-py3-none-any.whl", hash = "sha256:1f689e5dbc4b9247cb09ae820c7d34daeb1fdbd1db06123814b856dae7787272", size = 13584, upload-time = "2024-01-10T09:37:44.931Z" },
 ]
 
 [[package]]

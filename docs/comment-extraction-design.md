@@ -139,14 +139,4 @@ uv run python -m docx_comment_extractor.cli \
 ```
 
 produced a 5,497-line Markdown document containing 247 highlights and 247
-inline CriticMarkup comments. The opening excerpt begins:
-
-```text
-# Pentagon
-
-by Drew Fallon
-
-## Moscow, November 2002
-
-### Chapter 1: Night Market Dreams
-```
+inline CriticMarkup comments.

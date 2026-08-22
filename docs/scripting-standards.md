@@ -405,6 +405,7 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 
 ```python
 from plumbum import local
+from scripts.package import app
 
 
 def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
@@ -446,7 +447,10 @@ def test_git_tag_existing_is_a_noop(cmd_mox, monkeypatch, tmp_path):
     )
 
     cmd_mox.replay()
-    assert local["git"]["tag", "--list", "v1.2.3"]() == "v1.2.3\n"
+    app(tokens=[
+        "--bin-name", "demo", "--version", "1.2.3",
+        "--project-dir", str(tmp_path),
+    ])
     # No tag-creation mock is registered: verify rejects an unexpected write.
     cmd_mox.verify()
 ```
