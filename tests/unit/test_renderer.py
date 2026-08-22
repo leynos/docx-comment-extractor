@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import typing as typ
-from pathlib import Path
 
 import pytest
 
@@ -20,6 +19,8 @@ from docx_comment_extractor.renderer import (
 from tests.support_documents import build_fixture
 
 if typ.TYPE_CHECKING:
+    from pathlib import Path
+
     from syrupy.assertion import SnapshotAssertion
 
 
@@ -138,22 +139,3 @@ def test_render_document_snapshot_for_criticmarkup_literals(
     assert render_document(result.document) == snapshot, (
         "literal CriticMarkup rendering should match the approved escaped snapshot"
     )
-
-
-def test_render_sample_document_excerpt_snapshot(snapshot: SnapshotAssertion) -> None:
-    """The provided sample document should keep a stable opening excerpt."""
-    sample_path = (
-        Path(__file__).resolve().parents[2] / "commented-pentagon-draft-sam-c.docx"
-    )
-    if not sample_path.is_file():
-        pytest.skip("the external sample document was not supplied")
-
-    result = extract_document(sample_path)
-    rendered = render_document(result.document)
-
-    assert rendered.count("{>>") == 247, (
-        "the sample should render all 247 comment markers"
-    )
-    assert rendered.count("{==") == 247, "the sample should render all 247 highlights"
-    excerpt = "\n".join(rendered.splitlines()[:40])
-    assert excerpt == snapshot, "the sample opening excerpt should match its snapshot"

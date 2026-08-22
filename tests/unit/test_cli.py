@@ -130,6 +130,43 @@ def test_validate_input_path_rejects_oversized_documents(
         cli._validate_input_path(input_path)
 
 
+def test_validate_input_path_wraps_filesystem_failures(tmp_path: Path) -> None:
+    """Input metadata failures should remain user-facing validation errors."""
+    input_path = tmp_path / "input.docx"
+    input_path.touch()
+
+    def fail_to_measure(_path: Path) -> typ.NoReturn:
+        message = "stat failed"
+        raise OSError(message)
+
+    with pytest.raises(cli.UserFacingError, match="Could not inspect"):
+        cli._validate_input_path(input_path, file_size=fail_to_measure)
+
+
+def test_validate_output_path_wraps_filesystem_failures(tmp_path: Path) -> None:
+    """Output alias metadata failures should remain user-facing errors."""
+    input_path = tmp_path / "input.docx"
+    output_path = tmp_path / "output.md"
+
+    def fail_to_compare(_input: Path, _output: Path) -> typ.NoReturn:
+        message = "samefile failed"
+        raise OSError(message)
+
+    with pytest.raises(cli.UserFacingError, match="Could not inspect"):
+        cli._validate_output_path(
+            input_path,
+            output_path,
+            paths_refer_to_same_file=fail_to_compare,
+        )
+
+
+def test_duration_uses_the_injected_monotonic_clock() -> None:
+    """Duration calculation should not depend on the process-wide clock."""
+    assert cli._duration_ms(10.0, clock=lambda: 10.125) == 125.0, (
+        "the injected clock should determine the reported elapsed duration"
+    )
+
+
 def test_run_extraction_uses_the_injected_output_writer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -143,8 +180,13 @@ def test_run_extraction_uses_the_injected_output_writer(
     cli._run_extraction(
         input_path,
         output_path,
-        metrics=cli.OperationMetrics(),
-        output_writer=lambda path, markdown: persisted.append((path, markdown)),
+        dependencies=cli._RuntimeDependencies(
+            metrics=cli.OperationMetrics(),
+            output_writer=lambda path, markdown: persisted.append((path, markdown)),
+            clock=lambda: 0.0,
+            input_validator=cli._validate_input_path,
+            output_validator=cli._validate_output_path,
+        ),
     )
 
     assert persisted[0][0] == output_path, (
