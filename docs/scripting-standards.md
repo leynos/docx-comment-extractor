@@ -41,7 +41,7 @@ as a default.
   example, copying or removing trees) go through the `shutil` standard library
   module.
 
-### Minimal script (no CLI)
+### Minimal Cyclopts CLI example
 
 ```python
 #!/usr/bin/env -S uv run python
@@ -51,21 +51,48 @@ as a default.
 # ///
 
 from __future__ import annotations
-
 from pathlib import Path
-from plumbum import local
-from plumbum.cmd import tofu
+from typing import Optional, Annotated
+
+import cyclopts
+from cyclopts import App, Parameter
+from plumbum import local, FG
+from plumbum.cmd import git
+
+app = App(config=cyclopts.config.Env("INPUT_", command=False))
 
 
-def main() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    cluster_dir = project_root / "infra" / "clusters" / "dev"
-    with local.cwd(cluster_dir):
-        tofu["plan"]()
+@app.default
+def main(
+    *,
+    bin_name: Annotated[str, Parameter(required=True)],
+    version: Annotated[str, Parameter(required=True)],
+    project_dir: Annotated[Path, Parameter(env_var="INPUT_PROJECT_DIR")] = Path.cwd(),
+    formats: list[str] | None = None,
+    outdir: Optional[Path] = None,
+    dry_run: bool = False,
+):
+    project_root = project_dir.resolve()
+    dist = (outdir or (project_root / "dist")) / bin_name
+    if not dry_run:
+        dist.mkdir(parents=True, exist_ok=True)
+
+    if not dry_run:
+        tag = f"v{version}"
+        with local.cwd(project_root):
+            if not git["tag", "--list", tag]().strip():
+                (git["tag", tag] & FG)
+
+    print({
+        "bin_name": bin_name,
+        "version": version,
+        "formats": formats or [],
+        "dist": str(dist),
+    })
 
 
 if __name__ == "__main__":
-    main()
+    app()
 ```
 
 ### Cyclopts CLI pattern (environment‑first)
@@ -81,59 +108,44 @@ Employ Cyclopts when a script requires parameters, particularly under CI with
 # ///
 
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional, Annotated
 
 import cyclopts
 from cyclopts import App, Parameter
-from plumbum import local
-from plumbum.cmd import tofu
+from plumbum import local, FG
+from plumbum.cmd import git
 
-# Map INPUT_<PARAM> → function parameter without additional glue
 app = App(config=cyclopts.config.Env("INPUT_", command=False))
 
 
 @app.default
 def main(
     *,
-    # Required parameters
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
-    # Optional scalars
-    package_name: Optional[str] = None,
-    target: Optional[str] = None,
+    project_dir: Annotated[Path, Parameter(env_var="INPUT_PROJECT_DIR")] = Path.cwd(),
+    formats: list[str] | None = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
-    # Lists (whitespace/newline separated by default)
-    formats: list[str] | None = None,
-    man_paths: Annotated[
-        list[Path] | None, Parameter(env_var="INPUT_MAN_PATHS")
-    ] = None,
-    deb_depends: list[str] | None = None,
-    rpm_depends: list[str] | None = None,
 ):
-    name = package_name or bin_name
+    project_root = project_dir.resolve()
+    dist = (outdir or (project_root / "dist")) / bin_name
+    if not dry_run:
+        dist.mkdir(parents=True, exist_ok=True)
 
-    project_root = Path(__file__).resolve().parents[1]
-    build_dir = (outdir or (project_root / "dist")) / name
+    if not dry_run:
+        tag = f"v{version}"
+        with local.cwd(project_root):
+            if not git["tag", "--list", tag]().strip():
+                (git["tag", tag] & FG)
 
-    if dry_run:
-        print({
-            "name": name,
-            "version": version,
-            "target": target,
-            "formats": formats,
-            "man_paths": [str(p) for p in (man_paths or [])],
-            "deb_depends": deb_depends,
-            "rpm_depends": rpm_depends,
-            "build_dir": str(build_dir),
-        })
-        return
-
-    build_dir.mkdir(parents=True, exist_ok=True)
-    with local.cwd(build_dir):
-        tofu["plan"]()  # replace with real build tooling
+    print({
+        "bin_name": bin_name,
+        "version": version,
+        "formats": formats or [],
+        "dist": str(dist),
+    })
 
 
 if __name__ == "__main__":
@@ -167,7 +179,7 @@ Guidance:
 ### Basics: command calls, capturing output, handling failures
 
 ```python
-from __future__ annotations
+from __future__ import annotations
 from plumbum import local
 from plumbum.cmd import git, grep
 
@@ -238,9 +250,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DIST = PROJECT_ROOT / "dist"
-(DIST / "artifacts").mkdir(parents=True, exist_ok=True)
+(DIST / "artefacts").mkdir(parents=True, exist_ok=True)
 
-# Portable joins and normalisation
+# Portable joins and normalization
 cfg = PROJECT_ROOT.joinpath("config", "release.toml").resolve()
 ```
 
@@ -310,17 +322,21 @@ def main(
     *,
     bin_name: Annotated[str, Parameter(required=True)],
     version: Annotated[str, Parameter(required=True)],
+    project_dir: Annotated[Path, Parameter(env_var="INPUT_PROJECT_DIR")] = Path.cwd(),
     formats: list[str] | None = None,
     outdir: Optional[Path] = None,
     dry_run: bool = False,
 ):
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = project_dir.resolve()
     dist = (outdir or (project_root / "dist")) / bin_name
-    dist.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
+        tag = f"v{version}"
         with local.cwd(project_root):
-            (git["tag", f"v{version}"] & FG)
+            if not git["tag", "--list", tag]().strip():
+                (git["tag", tag] & FG)
 
     print({
         "bin_name": bin_name,
@@ -351,31 +367,31 @@ if __name__ == "__main__":
 ### Mocking Python dependencies (pytest-mock) and environment (monkeypatch)
 
 ```python
-import os
-from pathlib import Path
-from cyclopts.testing import invoke
 from scripts.package import app
 
 
-def test_reads_env_and_defaults(monkeypatch, tmp_path):
+def test_reads_env_and_defaults(monkeypatch, capsys, tmp_path):
     # Arrange env for Cyclopts
     monkeypatch.setenv("INPUT_BIN_NAME", "demo")
     monkeypatch.setenv("INPUT_VERSION", "1.2.3")
     monkeypatch.setenv("INPUT_FORMATS", "deb rpm")  # whitespace or newlines
+    monkeypatch.setenv("INPUT_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("INPUT_DRY_RUN", "true")
 
     # Exercise
-    result = invoke(app, [])
+    app(tokens=[])
+    captured = capsys.readouterr()
 
     # Assert
-    assert result.exit_code == 0
-    assert '"version": "1.2.3"' in result.stdout
+    assert '"version": "1.2.3"' in captured.out
+    assert not (tmp_path / "dist" / "demo").exists()
 
 
 def test_patch_python_dependency(mocker):
     # Example: patch a helper function used by the script
     from scripts import helpers
 
-    mocker.patch_object(helpers, "compute_checksum", return_value="deadbeef")
+    mocker.patch.object(helpers, "compute_checksum", return_value="deadbeef")
     assert helpers.compute_checksum(b"abc") == "deadbeef"
 ```
 
@@ -389,16 +405,19 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 
 ```python
 from plumbum import local
+from scripts.package import app
 
 
 def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     # Mock external command behaviour
+    cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(stdout="")
     cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=0)
 
     # Run the code under test while shims are active
     cmd_mox.replay()
+    local["git"]["tag", "--list", "v1.2.3"]()
     local["git"]["tag", "v1.2.3"]()
     cmd_mox.verify()
 
@@ -406,16 +425,34 @@ def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
 def test_git_tag_failure_surface_error(cmd_mox, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
+    cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(stdout="")
     cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=1, stderr="denied")
 
     cmd_mox.replay()
     try:
+        local["git"]["tag", "--list", "v1.2.3"]()
         local["git"]["tag", "v1.2.3"]()  # raises due to non‑zero rc
         assert False, "expected ProcessExecutionError"
     except Exception as exc:
         assert "Command exited with code" in str(exc)
     finally:
         cmd_mox.verify()
+
+
+def test_git_tag_existing_is_a_noop(cmd_mox, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(
+        stdout="v1.2.3\n"
+    )
+
+    cmd_mox.replay()
+    app(tokens=[
+        "--bin-name", "demo", "--version", "1.2.3",
+        "--project-dir", str(tmp_path),
+    ])
+    # No tag-creation mock is registered: verify rejects an unexpected write.
+    cmd_mox.verify()
 ```
 
 ### Spies and passthrough capture (turn real calls into fixtures)
