@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
+import typing as typ
 
-from .models import Block, Comment, DocumentModel
-from .models import heading_level_for_style as heading_level_for_style
+if typ.TYPE_CHECKING:
+    from .models import Block, Comment, DocumentModel
 
 CRITICMARKUP_ESCAPE_SEQUENCES = (
     ("{++", r"\{++"),
@@ -21,6 +23,13 @@ CRITICMARKUP_ESCAPE_SEQUENCES = (
     ("{>>", r"\{>>"),
     ("<<}", r"<<\}"),
 )
+
+MARKDOWN_TEXT_ESCAPE_SEQUENCES = (
+    ("&", "&amp;"),
+    ("[", r"\["),
+    ("]", r"\]"),
+)
+RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
 
 
 def render_document(document: DocumentModel) -> str:
@@ -113,15 +122,22 @@ def escape_criticmarkup_text(text: str) -> str:
         Text with literal CriticMarkup delimiter sequences escaped.
 
     """
-    escaped = text
+    escaped = _escape_markdown_text(text)
     for source, replacement in CRITICMARKUP_ESCAPE_SEQUENCES:
         escaped = escaped.replace(source, replacement)
     return escaped
 
 
+def _escape_markdown_text(text: str) -> str:
+    """Neutralize raw HTML and Markdown-link syntax in untrusted text."""
+    escaped = text
+    for source, replacement in MARKDOWN_TEXT_ESCAPE_SEQUENCES:
+        escaped = escaped.replace(source, replacement)
+    return RAW_HTML_PATTERN.sub(r"&lt;\g<content>&gt;", escaped)
+
+
 __all__ = [
     "escape_criticmarkup_text",
     "format_comment_reference",
-    "heading_level_for_style",
     "render_document",
 ]

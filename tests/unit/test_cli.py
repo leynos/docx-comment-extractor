@@ -295,8 +295,82 @@ def test_extract_comments_emits_bounded_structured_events(
         getattr(record, "outcome", None) == "success" for record in caplog.records
     ), "successful boundary events should expose a success outcome"
     assert all(
-        str(input_path) not in record.getMessage() for record in caplog.records
-    ), "structured events should not include raw input paths"
+        sensitive_value not in str(field_value)
+        for record in caplog.records
+        for field_value in record.__dict__.values()
+        for sensitive_value in (
+            str(input_path),
+            "commented text",
+            "Sam C",
+            "Needs evidence.",
+        )
+    ), "structured events should not expose paths or document and comment content"
+
+
+def test_stdout_writes_emit_output_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Successful standard-output writes should be observable boundaries."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    stream = StringIO()
+    monkeypatch.setattr(cli.sys, "stdout", stream)
+
+    with caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"):
+        cli.extract_comments(input_path)
+
+    output_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "operation", None) == "output_write"
+    )
+    assert getattr(output_record, "outcome", None) == "success", (
+        "a standard-output write should emit an output-write success event"
+    )
+    assert "{==commented text==}" in stream.getvalue(), (
+        "the standard-output contract should still render the extracted Markdown"
+    )
+
+
+@pytest.mark.parametrize("error_type", [BrokenPipeError, OSError])
+def test_stdout_write_failures_are_user_facing_and_observable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_type: type[OSError],
+) -> None:
+    """Standard-output failures should use the stable output-write boundary."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+
+    class FailingStdout:
+        """Raise the requested filesystem error when CLI output is written."""
+
+        @staticmethod
+        def write(_markdown: str) -> typ.NoReturn:
+            """Simulate a failed standard-output stream."""
+            message = "stdout failed"
+            raise error_type(message)
+
+    monkeypatch.setattr(cli.sys, "stdout", FailingStdout())
+
+    with (
+        caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"),
+        pytest.raises(cli.UserFacingError, match="Could not write"),
+    ):
+        cli.extract_comments(input_path)
+
+    output_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "operation", None) == "output_write"
+    )
+    assert getattr(output_record, "outcome", None) == "failure", (
+        "a failed standard-output write should emit an output-write failure event"
+    )
+    assert getattr(output_record, "error_category", None) == "output_write", (
+        "a failed standard-output write should have a stable error category"
+    )
 
 
 def test_extract_comments_records_warning_metrics(
