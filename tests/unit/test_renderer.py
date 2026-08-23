@@ -8,12 +8,11 @@ import typing as typ
 import pytest
 
 from docx_comment_extractor.extractor import extract_document
-from docx_comment_extractor.models import Comment
+from docx_comment_extractor.models import Block, Comment, DocumentModel, Fragment
 from docx_comment_extractor.renderer import (
     CRITICMARKUP_ESCAPE_SEQUENCES,
     escape_criticmarkup_text,
     format_comment_reference,
-    heading_level_for_style,
     render_document,
 )
 from tests.support_documents import build_fixture
@@ -22,19 +21,6 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from syrupy.assertion import SnapshotAssertion
-
-
-def test_heading_level_for_style() -> None:
-    """Heading styles should map to Markdown ATX levels."""
-    assert heading_level_for_style("Heading 1") == 1, (
-        "Heading 1 should map to ATX level 1"
-    )
-    assert heading_level_for_style("Heading2") == 2, (
-        "Heading2 should map to ATX level 2"
-    )
-    assert heading_level_for_style("Body Text") is None, (
-        "non-heading styles should not receive an ATX level"
-    )
 
 
 def test_format_comment_reference_with_metadata() -> None:
@@ -110,6 +96,42 @@ def test_escape_criticmarkup_text_handles_every_delimiter(
     """Every supported CriticMarkup delimiter should be neutralized."""
     assert escape_criticmarkup_text(source) == replacement, (
         "each configured CriticMarkup delimiter should use its mapped escape"
+    )
+
+
+def test_render_document_neutralizes_html_and_unsafe_links() -> None:
+    """Untrusted document and comment text should remain literal Markdown text."""
+    unsafe_text = '<script>alert("x")</script> [run](javascript:alert(1))'
+    document = DocumentModel(
+        blocks=(
+            Block(
+                kind="paragraph",
+                fragments=(
+                    Fragment(
+                        text=unsafe_text,
+                        start_comment_ids=("0",),
+                        end_comment_ids=("0",),
+                    ),
+                ),
+            ),
+        ),
+        comments=(
+            Comment(
+                comment_id="0",
+                author="<script>author</script>",
+                body=unsafe_text,
+            ),
+        ),
+    )
+
+    rendered = render_document(document)
+
+    assert "<script>" not in rendered, "raw HTML tags should be entity-escaped"
+    assert "[run](javascript:" not in rendered, (
+        "unsafe Markdown links should not remain active link syntax"
+    )
+    assert "&lt;script&gt;" in rendered, (
+        "escaped raw HTML should remain legible as literal text"
     )
 
 

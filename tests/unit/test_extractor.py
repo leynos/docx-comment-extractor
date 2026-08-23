@@ -17,6 +17,7 @@ from docx_comment_extractor import extractor
 from docx_comment_extractor.extractor import (
     ExtractionError,
     _extract_paragraph_block,
+    _heading_level_for_word_style,
     extract_document,
 )
 from docx_comment_extractor.renderer import render_document
@@ -113,6 +114,41 @@ def test_extract_document_rejects_oversized_packages(
         extract_document(document_path, document_loader=fail_if_loaded)
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        (
+            "excessive-package-members",
+            "MAX_PACKAGE_MEMBERS",
+            2,
+            "too many members",
+        ),
+        (
+            "high-compression-ratio",
+            "MAX_UNCOMPRESSED_BYTES",
+            1024,
+            "uncompressed content is too large",
+        ),
+    ],
+)
+def test_extract_document_rejects_zip_resource_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[str, str, int, str],
+) -> None:
+    """ZIP metadata limits should reject unsafe packages before loading them."""
+    fixture_name, limit_name, limit_value, message = case
+    document_path = build_fixture(fixture_name, tmp_path / f"{fixture_name}.docx")
+    monkeypatch.setattr(extractor, limit_name, limit_value)
+
+    def fail_if_loaded(path: Path) -> typ.NoReturn:
+        del path
+        pytest.fail("resource-limit failures should occur before package loading")
+
+    with pytest.raises(ExtractionError, match=message):
+        extract_document(document_path, document_loader=fail_if_loaded)
+
+
 def test_extract_document_builds_simple_model(tmp_path: Path) -> None:
     """A single commented run should be represented in the block model."""
     document_path = build_fixture("simple-comment", tmp_path / "simple.docx")
@@ -160,6 +196,26 @@ def test_extract_document_normalizes_comment_metadata(tmp_path: Path) -> None:
         31,
         tzinfo=dt.UTC,
     ), "a naive comment timestamp should normalize to UTC"
+
+
+def test_extract_document_normalizes_timezone_aware_metadata(tmp_path: Path) -> None:
+    """Timezone-aware comment timestamps should convert to UTC."""
+    document_path = build_fixture(
+        "timezone-aware-comment",
+        tmp_path / "timezone-aware-comment.docx",
+    )
+
+    result = extract_document(document_path)
+
+    assert result.document.comments[0].timestamp == dt.datetime(
+        2026,
+        4,
+        9,
+        20,
+        35,
+        31,
+        tzinfo=dt.UTC,
+    ), "timezone-aware timestamps should normalize to their UTC instant"
 
 
 def test_extract_document_supports_multi_run_ranges(tmp_path: Path) -> None:
@@ -220,6 +276,34 @@ def test_extract_paragraph_block_accumulates_many_end_markers() -> None:
 
     assert block.fragments[0].end_comment_ids == tuple(map(str, range(128))), (
         "the paragraph block should retain every end marker in document order"
+    )
+
+
+@pytest.mark.parametrize("marker_name", ["commentRangeStart", "commentRangeEnd"])
+def test_extract_paragraph_block_rejects_markers_without_identifiers(
+    marker_name: str,
+) -> None:
+    """Malformed comment boundary markers should not leak low-level key errors."""
+    document = Document()
+    paragraph = document.add_paragraph("marked")
+    marker = OxmlElement(f"w:{marker_name}")
+    paragraph._p.append(marker)
+
+    with pytest.raises(ExtractionError, match="missing its required w:id"):
+        _extract_paragraph_block(paragraph)
+
+
+@pytest.mark.parametrize(
+    ("style_name", "expected_level"),
+    [("Heading 1", 1), ("Heading2", 2), ("Heading 3", 3), ("Heading6", 6)],
+)
+def test_heading_level_for_word_style(
+    style_name: str,
+    expected_level: int,
+) -> None:
+    """The python-docx adapter should map supported Word heading style names."""
+    assert _heading_level_for_word_style(style_name) == expected_level, (
+        "Word heading styles should map to their equivalent Markdown levels"
     )
 
 

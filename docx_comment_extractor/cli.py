@@ -252,11 +252,19 @@ def _write_rendered_document(
     dependencies: _RuntimeDependencies,
 ) -> None:
     """Write rendered Markdown to standard output or an injected file writer."""
-    if output is None:
-        sys.stdout.write(rendered.markdown)
+    output_write_started_at = dependencies.clock()
+    try:
+        if output is None:
+            sys.stdout.write(rendered.markdown)
+        else:
+            dependencies.output_writer(output, rendered.markdown)
+    except UserFacingError:
+        _log_output_write_failure(dependencies, output_write_started_at)
+        raise
+    except OSError as error:
+        _log_output_write_failure(dependencies, output_write_started_at)
+        raise UserFacingError.output_write() from error
     else:
-        output_write_started_at = dependencies.clock()
-        dependencies.output_writer(output, rendered.markdown)
         _log_event(
             dependencies.metrics,
             "output_write",
@@ -268,7 +276,24 @@ def _write_rendered_document(
                 )
             },
         )
+    if output is not None:
         _print_success(output, rendered.comment_count, len(rendered.warnings))
+
+
+def _log_output_write_failure(
+    dependencies: _RuntimeDependencies,
+    started_at: float,
+) -> None:
+    """Record a bounded failure event for a terminal output write."""
+    _log_event(
+        dependencies.metrics,
+        "output_write",
+        "failure",
+        {
+            "duration_ms": _duration_ms(started_at, clock=dependencies.clock),
+            "error_category": "output_write",
+        },
+    )
 
 
 def _report_warnings(

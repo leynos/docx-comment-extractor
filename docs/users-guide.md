@@ -1,4 +1,4 @@
-# docx-comment-extractor Users' Guide
+# docx-comment-extractor users' guide
 
 ## Overview
 
@@ -70,8 +70,8 @@ fails. The CLI rejects an output path that aliases the input document.
 
 ## Output format
 
-The extractor preserves document order and maps Word heading styles to ATX
-(hash-prefixed) Markdown headings. Word comments are rendered inline using a
+The extractor preserves document order and maps Word heading styles to
+hash-prefixed Markdown headings. Word comments are rendered inline using a
 CriticMarkup highlight followed immediately by a CriticMarkup comment:
 
 ```text
@@ -92,6 +92,9 @@ before rendering, so text such as `{>>literal<<}` remains literal Markdown:
 \{>>literal<<\}
 ```
 
+Raw HTML and Markdown link syntax in source text and comment bodies are also
+neutralized before rendering, so untrusted content remains literal text.
+
 Comment metadata follows these rules:
 
 - Author names are stripped of surrounding whitespace; a blank author is
@@ -111,7 +114,8 @@ Extraction and output-write failures use the same status.
 Before extraction, both supported entry points—the CLI and
 `extract_document`—reject an on-disk `.docx` package larger than 20 MiB. This
 bound applies to the input package only; rendered Markdown and the selected
-output destination are not subject to this limit.
+output destination are not subject to this limit. ZIP packages are additionally
+limited to 10,000 members and 100 MiB of total uncompressed content.
 
 Unsupported top-level tables are skipped with a warning rather than failing the
 whole extraction. The current release does not yet extract tables, footnotes,

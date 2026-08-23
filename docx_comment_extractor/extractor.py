@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import dataclasses as dc
 import datetime as dt
+import re
 import typing as typ
 import zlib
-from zipfile import BadZipFile
+from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
@@ -21,10 +22,12 @@ from .models import (
     ExtractionResult,
     ExtractionWarning,
     Fragment,
-    heading_level_for_style,
 )
 
 MAX_INPUT_BYTES = 20 * 1024 * 1024
+MAX_PACKAGE_MEMBERS = 10_000
+MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+WORD_HEADING_STYLE_RE = re.compile(r"^Heading ?(?P<level>[1-6])$")
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -90,7 +93,9 @@ def extract_document(
 
     """
     try:
-        is_oversized = _is_oversized_package(path)
+        if _is_oversized_package(path):
+            _raise_oversized_package()
+        _validate_package_limits(path)
     except (
         BadZipFile,
         EOFError,
@@ -103,8 +108,6 @@ def extract_document(
         zlib.error,
     ) as error:
         _raise_extraction_error(error)
-    if is_oversized:
-        _raise_oversized_package()
     document = _load_document_for_extraction(path, document_loader)
     comments = _extract_comments(document)
     blocks, warnings = _extract_blocks(document)
@@ -117,6 +120,18 @@ def extract_document(
 def _is_oversized_package(path: Path) -> bool:
     """Return whether a readable package path exceeds the supported size limit."""
     return path.stat().st_size > MAX_INPUT_BYTES
+
+
+def _validate_package_limits(path: Path) -> None:
+    """Reject ZIP packages whose metadata exceeds supported resource limits."""
+    with ZipFile(path) as package:
+        members = package.infolist()
+    if len(members) > MAX_PACKAGE_MEMBERS:
+        message = "Input document ZIP package contains too many members."
+        raise ExtractionError(message)
+    if sum(member.file_size for member in members) > MAX_UNCOMPRESSED_BYTES:
+        message = "Input document ZIP package uncompressed content is too large."
+        raise ExtractionError(message)
 
 
 def _raise_oversized_package() -> typ.NoReturn:
@@ -237,7 +252,7 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
                     pending_start_ids.clear()
 
     style_name = paragraph.style.name if paragraph.style is not None else ""
-    heading_level = heading_level_for_style(style_name)
+    heading_level = _heading_level_for_word_style(style_name)
     kind = "heading" if heading_level is not None else "paragraph"
     return Block(
         kind=kind,
@@ -277,7 +292,11 @@ def _extract_inline_text(element: XmlElement) -> str:
 def _comment_id(element: XmlElement) -> str:
     """Read a comment identifier from an OOXML range marker."""
     attribute_name = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}id"
-    return str(element.attrib[attribute_name])
+    comment_id = element.attrib.get(attribute_name)
+    if comment_id is None:
+        message = "Comment range marker is missing its required w:id attribute."
+        raise ExtractionError(message)
+    return str(comment_id)
 
 
 def _node_text(node: XmlElement) -> str:
@@ -297,3 +316,11 @@ def _local_name(element: XmlElement) -> str:
     """Return an XML element name without its namespace."""
     tag = str(element.tag)
     return tag.rsplit("}", 1)[-1]
+
+
+def _heading_level_for_word_style(style_name: str) -> int | None:
+    """Map a python-docx Word heading style name to a Markdown level."""
+    match = WORD_HEADING_STYLE_RE.fullmatch(style_name)
+    if match is None:
+        return None
+    return int(match.group("level"))

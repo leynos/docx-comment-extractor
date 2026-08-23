@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import dataclasses as dc
-import re
 import typing as typ
 
 if typ.TYPE_CHECKING:
     import datetime as dt
-
-HEADING_STYLE_RE = re.compile(r"^Heading ?(?P<level>[1-6])$")
 
 BlockKind = typ.Literal["heading", "paragraph"]
 
@@ -126,11 +123,3 @@ class ExtractionResult:
 
     document: DocumentModel
     warnings: tuple[ExtractionWarning, ...]
-
-
-def heading_level_for_style(style_name: str) -> int | None:
-    """Return the Markdown ATX level for a Word heading style name."""
-    match = HEADING_STYLE_RE.fullmatch(style_name)
-    if match is None:
-        return None
-    return int(match.group("level"))

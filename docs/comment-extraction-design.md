@@ -60,7 +60,7 @@ start and end markers rather than a general overlap graph.
 ## Rendering rules
 
 - Word heading styles named `Heading 1` through `Heading 6`, with or without a
-  space before the number, are rendered as ATX (hash-prefixed) headings.
+  space before the number, are rendered as hash-prefixed Markdown headings.
 - Comment metadata is normalized to
   `Author, YYYY-MM-DDTHH:MM:SSZ: comment text` when author and timestamp are
   available.
@@ -69,6 +69,8 @@ start and end markers rather than a general overlap graph.
   between paragraphs so that the highlight range remains contiguous.
 - Literal CriticMarkup delimiters in source text or comment bodies are escaped
   with backslashes before rendering.
+- Raw HTML and Markdown link syntax in source text or comment bodies are
+  neutralized before rendering so untrusted content remains literal text.
 
 ## Unsupported content
 
@@ -79,7 +81,8 @@ warning. Footnotes, text boxes, tracked changes, and images are not yet handled.
 Both supported entry points—the CLI and `extract_document`—enforce a 20 MiB
 maximum for the on-disk `.docx` input package before extraction begins. The
 bound applies to the input package only; rendered Markdown and output files
-have no corresponding size limit in this release.
+have no corresponding size limit in this release. ZIP packages are additionally
+limited to 10,000 members and 100 MiB of total uncompressed content.
 
 ## Testing strategy
 
