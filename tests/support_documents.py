@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typing as typ
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from docx import Document
 from docx.oxml import OxmlElement
@@ -23,6 +24,7 @@ class CommentElement(typ.Protocol):
 COMMENT_DATE_ATTR = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}date"
 FIXED_COMMENT_TIMESTAMP = "2026-04-09T20:35:31Z"
 NAIVE_COMMENT_TIMESTAMP = "2026-04-09T20:35:31"
+AWARE_COMMENT_TIMESTAMP = "2026-04-09T22:35:31+02:00"
 
 
 def build_simple_comment_docx(path: Path) -> Path:
@@ -228,6 +230,67 @@ def build_inline_controls_docx(path: Path) -> Path:
     return path
 
 
+def build_timezone_aware_comment_docx(path: Path) -> Path:
+    """Create a comment with a timezone-aware timestamp.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
+    document = Document()
+    run = document.add_paragraph().add_run("Commented text")
+    comment = document.add_comment(run, text="Normalize metadata.", author="Sam C")
+    _set_timestamp(comment, AWARE_COMMENT_TIMESTAMP)
+    document.save(str(path))
+    return path
+
+
+def build_excessive_package_members_docx(path: Path) -> Path:
+    """Create a compact ZIP package with several archive members.
+
+    Parameters
+    ----------
+    path
+        Destination path for the synthetic package.
+
+    Returns
+    -------
+    Path
+        ``path`` after the synthetic package has been saved.
+
+    """
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        for index in range(3):
+            archive.writestr(f"member-{index}.xml", "x")
+    return path
+
+
+def build_high_compression_ratio_docx(path: Path) -> Path:
+    """Create a small ZIP package with a disproportionately large member.
+
+    Parameters
+    ----------
+    path
+        Destination path for the synthetic package.
+
+    Returns
+    -------
+    Path
+        ``path`` after the synthetic package has been saved.
+
+    """
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("repetitive.xml", "0" * 4096)
+    return path
+
+
 def build_fixture(name: str, path: Path) -> Path:
     """Build a named fixture document at ``path``.
 
@@ -252,6 +315,9 @@ def build_fixture(name: str, path: Path) -> Path:
         "criticmarkup-literal": build_criticmarkup_literal_docx,
         "comment-normalization": build_comment_normalization_docx,
         "inline-controls": build_inline_controls_docx,
+        "timezone-aware-comment": build_timezone_aware_comment_docx,
+        "excessive-package-members": build_excessive_package_members_docx,
+        "high-compression-ratio": build_high_compression_ratio_docx,
     }
     return builders[name](path)
 
