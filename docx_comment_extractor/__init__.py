@@ -1,7 +1,8 @@
-"""docx-comment-extractor package."""
+"""Public package API for `docx-comment-extractor`."""
 
 from __future__ import annotations
 
-from ._backend import hello as hello
+from .extractor import ExtractionError, extract_document
+from .renderer import render_document
 
-__all__ = ["hello"]
+__all__ = ["ExtractionError", "extract_document", "render_document"]
