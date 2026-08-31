@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 import typing as typ
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import suppress
 from pathlib import Path
 
@@ -47,7 +47,7 @@ class OperationMetrics:
         """Create an empty, lock-protected metrics owner."""
         self._lock = threading.Lock()
         self._operation_counts: Counter[tuple[str, str]] = Counter()
-        self._duration_totals_ms: Counter[str] = Counter()
+        self._duration_totals_ms: defaultdict[str, float] = defaultdict(float)
 
     def record(
         self,
