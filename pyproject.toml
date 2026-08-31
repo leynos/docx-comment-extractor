@@ -137,6 +137,9 @@ timeout = 30
 [tool.uv]
 package = true
 
+[tool.ty.environment]
+extra-paths = ["scripts"]
+
 
 [build-system]
 requires = ["hatchling"]
