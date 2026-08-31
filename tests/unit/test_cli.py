@@ -406,10 +406,16 @@ def test_operation_metrics_are_isolated_and_resettable() -> None:
     second_metrics = cli.OperationMetrics()
 
     first_metrics.record("validation", "success", 1.5)
+    first_metrics.record("validation", "success", 2)
+    first_metrics.record("validation", "success", "not-a-duration")
+    first_snapshot = first_metrics.snapshot()
 
-    assert first_metrics.snapshot().operation_counts == {
-        ("validation", "success"): 1
-    }, "a metrics owner should retain its own operation count"
+    assert first_snapshot.operation_counts == {("validation", "success"): 3}, (
+        "a metrics owner should retain every operation count"
+    )
+    assert first_snapshot.duration_totals_ms == {"validation": 3.5}, (
+        "numeric durations should accumulate while non-numeric values are ignored"
+    )
     assert second_metrics.snapshot().operation_counts == {}, (
         "separate metrics owners should not share operation counts"
     )
@@ -418,6 +424,12 @@ def test_operation_metrics_are_isolated_and_resettable() -> None:
 
     assert first_metrics.snapshot().operation_counts == {}, (
         "reset should clear the owner operation counts"
+    )
+    assert first_metrics.snapshot().duration_totals_ms == {}, (
+        "reset should clear the owner duration totals"
+    )
+    assert first_snapshot.duration_totals_ms == {"validation": 3.5}, (
+        "snapshots should remain detached after later metric resets"
     )
 
 
