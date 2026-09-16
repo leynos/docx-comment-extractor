@@ -1,7 +1,14 @@
 MDLINT ?= markdownlint-cli2
+# `make fmt` and `make check-fmt` call mdtablefix directly. `--git` selects the
+# Markdown files Git tracks and `--include-untracked` adds the untracked files
+# Git does not ignore, so a new document is formatted before it is staged.
+# Both modes need mdtablefix 0.6.0 or later; CI pins the version at the
+# install-mdtablefix step.
+MDTABLEFIX ?= mdtablefix
+MDTABLEFIX_SELECT = --git --include-untracked
+MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 NIXIE ?= nixie
-MDFORMAT_ALL ?= mdformat-all
-TOOLS = $(MDFORMAT_ALL) ty $(MDLINT) uv
+TOOLS = ty $(MDLINT) uv
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF_VERSION ?= 0.14.13
@@ -60,14 +67,15 @@ $(VENV_TOOLS): ## Verify required CLI tools in venv
 	$(call ensure_tool_venv,$@)
 endif
 
-fmt: $(MDFORMAT_ALL) ## Format sources
+fmt: ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
-	$(MDFORMAT_ALL)
+	$(MDTABLEFIX) --in-place $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
+	$(MDLINT) --fix "**/*.md"
 
 check-fmt: ## Verify formatting
 	$(RUFF) format --check
-	# mdformat-all doesn't currently do checking
+	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
 lint: ## Run linters
 	$(RUFF) check
