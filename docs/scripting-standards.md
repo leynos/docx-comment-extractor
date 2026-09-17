@@ -441,6 +441,20 @@ def test_spy_and_record(cmd_mox, monkeypatch, tmp_path):
     assert args == ["hello world"]
 ```
 
+## Coverage workflow contract
+
+Pull-request CI generates Python coverage locally and ratchets it against the
+baseline written by `coverage-main.yml`. It runs serially so that the
+pull-request and main measurements use the same execution model. Pull-request
+jobs do not invoke CodeScene, expose `CS_ACCESS_TOKEN`, or require a full Git
+history.
+
+`coverage-main.yml` runs after pushes to `main`. It generates the same
+source-scoped, serial coverage report, saves the updated ratchet baseline, and
+publishes the report to CodeScene using the repository secret. Keeping
+publication on main gives every pull request one authoritative baseline while
+keeping the publication credential out of pull-request jobs.
+
 ## Operational guidelines
 
 ### Shared spelling policy helper

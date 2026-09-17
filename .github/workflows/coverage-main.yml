@@ -1,13 +1,20 @@
-name: CI
+name: Coverage (main)
+
+# Main owns publication and the ratchet baseline. Pull requests only run the
+# local ratchet in ci.yml, so they never receive the publication token.
 
 on:
   push:
     branches: [main]
-  pull_request:
 
 jobs:
-  lint-test:
+  coverage-upload:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN || '' }}
+      CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -20,34 +27,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
-      - name: Install CLI tools
-        run: |
-          for tool in mbake ty; do uv tool install ${tool}; done
-          npm install -g markdownlint-cli2
-
-      - name: Validate Makefile
-        run: mbake validate Makefile
-
-      - name: Install code
-        run: make build
-
-      - name: Check formatting
-        run: make check-fmt
-
-      - name: Run ruff
-        run: make lint
-
-      - name: Check spelling
-        run: make spelling
-
-      - name: Run typechecker
-        run: make typecheck
-
-      # Pull requests ratchet their local coverage against the baseline written
-      # by coverage-main.yml. Main runs that workflow instead, so this step is
-      # skipped on pushes to avoid duplicate coverage generation.
       - name: Generate coverage
-        if: github.event_name == 'pull_request'
         uses: leynos/shared-actions/.github/actions/generate-coverage@152d9c4784d0ae5877938a984fe6d1f04d718fd8
         with:
           language: python
@@ -57,3 +37,13 @@ jobs:
           baseline-python-file: .coverage-baseline.python
           pytest-workers: ''
           with-ratchet: 'true'
+
+      - name: Upload coverage data to CodeScene
+        if: env.CS_ACCESS_TOKEN != ''
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@152d9c4784d0ae5877938a984fe6d1f04d718fd8
+        with:
+          path: coverage.xml
+          format: cobertura
+          mode: upload
+          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          installer-checksum: ${{ env.CODESCENE_CLI_SHA256 }}
