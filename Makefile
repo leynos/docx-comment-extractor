@@ -72,9 +72,9 @@ check-fmt: ## Verify formatting
 lint: ## Run linters
 	$(RUFF) check
 
-typecheck: build ty ## Run typechecking
-	ty --version
-	ty check
+typecheck: build ## Run typechecking
+	$(UV_ENV) uv run ty --version
+	$(UV_ENV) uv run ty check --extra-search-path scripts
 
 markdownlint: $(MDLINT) spelling ## Lint Markdown files and enforce repository spelling
 	$(MDLINT) '**/*.md'
