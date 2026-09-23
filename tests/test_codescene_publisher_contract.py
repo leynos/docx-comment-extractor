@@ -217,6 +217,15 @@ def test_publisher_coverage_is_pinned_and_unconditional(
     assert any(expected in p for p in coverage_violations(documents))
 
 
+@pytest.mark.parametrize("lane", ["publisher", "pull request"])
+def test_only_mains_push_writes_the_baseline(documents: Documents, lane: str) -> None:
+    """`publish-baseline: always` lets a branch write the ratchet baseline."""
+    document = find_publisher(documents)[0] if lane == "publisher" else documents[LANE]
+    inputs = typ.cast("dict[str, object]", coverage_step(document)["with"])
+    inputs["publish-baseline"] = "always"
+    assert any("publish-baseline" in p for p in coverage_violations(documents))
+
+
 def _restore_refresher(documents: Documents) -> None:
     """Bring back the workflow that refreshed the installer checksum."""
     documents["get-codescene-sha.yml"] = {True: "workflow_dispatch", "jobs": {}}

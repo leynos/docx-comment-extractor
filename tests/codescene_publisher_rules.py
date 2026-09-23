@@ -243,7 +243,24 @@ def coverage_violations(documents: dict[str, Document]) -> list[str]:
         found.append("no pull-request lane generates coverage for the ratchet")
     for name, step in lanes:
         found += _pull_request_lane(name, step, trunk)
-    return found
+    return found + _baseline_writers(documents)
+
+
+def _baseline_writers(documents: dict[str, Document]) -> list[str]:
+    """Report a coverage step that may write the baseline off main's push.
+
+    The default, `auto`, saves the baseline only on a push to
+    `refs/heads/main`. `always` hands that restriction to the calling
+    workflow, so on a pull-request lane each push could lower the baseline its
+    next push ratchets against, and on the publisher a dispatch from a branch
+    would write one.
+    """
+    return [
+        f"{name} coverage must leave publish-baseline at `auto`"
+        for name, document in documents.items()
+        for step in coverage_steps(name, document)
+        if _with(step, "publish-baseline") not in {None, "auto"}
+    ]
 
 
 def _with(step: Step, key: str) -> object:
