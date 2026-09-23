@@ -443,17 +443,31 @@ def test_spy_and_record(cmd_mox, monkeypatch, tmp_path):
 
 ## Coverage workflow contract
 
-Pull-request CI generates Python coverage locally and ratchets it against the
-baseline written by `coverage-main.yml`. It runs serially so that the
-pull-request and main measurements use the same execution model. Pull-request
-jobs do not invoke CodeScene, expose `CS_ACCESS_TOKEN`, or require a full Git
-history.
+Pull-request continuous integration (CI) generates Python coverage and
+ratchets it against the baseline written by `coverage-main.yml`. The
+pull-request lane publishes no coverage artefact, never contacts CodeScene, and
+never receives `CS_ACCESS_TOKEN`, so a change in CodeScene's application
+programming interface (API) cannot hold a pull request.
 
-`coverage-main.yml` runs after pushes to `main`. It generates the same
-source-scoped, serial coverage report, saves the updated ratchet baseline, and
-publishes the report to CodeScene using the repository secret. Keeping
-publication on main gives every pull request one authoritative baseline while
-keeping the publication credential out of pull-request jobs.
+`coverage-main.yml` is the only publisher. It runs on each push to `main`, and
+on demand through `workflow_dispatch`, refreshes the ratchet baseline, and
+uploads the report to CodeScene. The upload step binds the token itself and
+runs only when the token is present and the ref is `refs/heads/main`, so a
+dispatch from a branch cannot publish that branch's coverage as the trunk's.
+Its concurrency group never cancels a run in progress; a newer push replaces
+any pending run, so the newest baseline wins. Both coverage steps select the
+same inputs at the same `shared-actions` pin, because the pull-request ratchet
+is only meaningful against a baseline measured the same way.
+
+`tests/test_codescene_pull_request_contract.py` and
+`tests/test_codescene_publisher_contract.py` hold this shape, with the rules
+in `tests/codescene_pull_request_rules.py`,
+`tests/codescene_publisher_rules.py`, and the strict workflow reader in
+`tests/codescene_workflow_reader.py`. The rules read every workflow a pull
+request can start, following local reusable-workflow calls and `workflow_run`
+chains, and refuse any mention of the CodeScene host, uploader, client, or
+token there. Each clause has a test that mutates the workflows and expects the
+clause to refuse the result.
 
 ## Operational guidelines
 
