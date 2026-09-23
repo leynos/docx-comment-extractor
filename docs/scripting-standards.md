@@ -449,9 +449,12 @@ pull-request lane publishes no coverage artefact, never contacts CodeScene, and
 never receives `CS_ACCESS_TOKEN`, so a change in CodeScene's application
 programming interface (API) cannot hold a pull request.
 
-`coverage-main.yml` is the only publisher. It runs on each push to `main`, and
-on demand through `workflow_dispatch`, refreshes the ratchet baseline, and
-uploads the report to CodeScene. The upload step binds the token itself and
+`coverage-main.yml` is the only publisher. On each push to `main` it refreshes
+the ratchet baseline and uploads the report to CodeScene. It also runs on
+demand through `workflow_dispatch`, for merges that fire no push event: a
+dispatch on `main` uploads a fresh report, but the shared action advances the
+baseline only on a push, so the ratchet catches up at the next push to
+`main`. The upload step binds the token itself and
 runs only when the token is present and the ref is `refs/heads/main`, so a
 dispatch from a branch cannot publish that branch's coverage as the trunk's.
 Its concurrency group never cancels a run in progress; a newer push replaces
