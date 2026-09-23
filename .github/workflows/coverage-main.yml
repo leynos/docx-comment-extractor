@@ -24,9 +24,12 @@ on:
 
 # Never cancelled. A cancelled run abandons both its upload and its baseline
 # write; with cancellation off, a newer push waits for the running one and
-# replaces any run still pending, so the newest baseline wins.
+# replaces any run still pending, so the newest baseline wins. The group is
+# keyed on the ref because a newer run replaces a pending one whatever
+# cancel-in-progress says: in one fixed group, a dispatch from a branch, which
+# neither uploads nor writes a baseline, could displace main's pending push.
 concurrency:
-  group: coverage-main
+  group: coverage-main-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -37,6 +40,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+        # Nothing after checkout needs Git credentials, and the coverage run
+        # executes repository and dependency code.
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
