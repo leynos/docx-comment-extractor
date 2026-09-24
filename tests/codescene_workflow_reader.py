@@ -1,9 +1,9 @@
 """Read GitHub workflow files strictly, for the CV-005 contract.
 
-Only `read_workflows` touches the disk; everything else is pure over parsed
-documents, so the rules in `codescene_pull_request_rules` and
-`codescene_publisher_rules` can be driven over mutated copies as readily as
-over this repository's files.
+Nothing here touches the disk; `codescene_workflow_files` does. Everything
+here is pure over parsed documents, so the rules in
+`codescene_pull_request_rules` and `codescene_publisher_rules` can be driven
+over mutated copies as readily as over this repository's files.
 
 A reading that finds nothing is a fault of the reader, not a pass: every rule
 built on these readings is a refusal, and a refusal over an empty subject set
@@ -19,7 +19,6 @@ import yaml
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
-    from pathlib import Path
 
 type Document = dict[object, object]
 type Step = dict[str, object]
@@ -94,52 +93,6 @@ def load_workflow(name: str, text: str) -> Document:
         message = f"{name}: a workflow must be a mapping"
         raise WorkflowError(message)
     return document
-
-
-def read_workflows(directory: Path) -> dict[str, Document]:
-    """Parse every workflow in a directory, by file name.
-
-    Both suffixes and any case are read, because GitHub runs all of them.
-
-    Parameters
-    ----------
-    directory : Path
-        The workflow directory.
-
-    Returns
-    -------
-    dict of str to Document
-        Each workflow's parsed document, keyed by file name.
-
-    Raises
-    ------
-    WorkflowError
-        If the directory cannot be listed or holds no workflow, or any
-        workflow cannot be read as UTF-8 or fails to parse.
-
-    """
-    try:
-        paths = sorted(
-            path
-            for path in directory.iterdir()
-            if path.suffix.casefold() in {".yml", ".yaml"}
-        )
-    except OSError as error:
-        message = f"cannot list workflows in {directory}: {error}"
-        raise WorkflowError(message) from error
-    if not paths:
-        message = f"no workflows were read from {directory}"
-        raise WorkflowError(message)
-    return {path.name: load_workflow(path.name, _read_text(path)) for path in paths}
-
-
-def _read_text(path: Path) -> str:
-    """Read one workflow as UTF-8, naming the file on failure."""
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        message = f"{path.name}: cannot be read as UTF-8 text: {error}"
-        raise WorkflowError(message) from error
 
 
 def triggers(name: str, document: Document) -> dict[str, object]:
@@ -318,12 +271,44 @@ def continues_on_error(mapping: dict[str, object]) -> bool:
 
     `continue-on-error` keeps the step running while its failure turns green,
     which silences a ratchet or an upload as surely as `if: false` does.
+
+    Parameters
+    ----------
+    mapping : dict of str to object
+        A step or job mapping.
+
+    Returns
+    -------
+    bool
+        True unless `continue-on-error` is absent or literally false.
+
     """
     return mapping.get("continue-on-error", False) is not False
 
 
 def holding_job(name: str, document: Document, step: Step) -> dict[str, object]:
-    """Return the job in one workflow whose steps include this step."""
+    """Return the job in one workflow whose steps include this step.
+
+    Parameters
+    ----------
+    name : str
+        The workflow's file name, for messages.
+    document : Document
+        The parsed workflow.
+    step : Step
+        A step mapping taken from that document, matched by identity.
+
+    Returns
+    -------
+    dict of str to object
+        The job mapping holding the step.
+
+    Raises
+    ------
+    StopIteration
+        If no job in the document holds this step object.
+
+    """
     return next(
         job
         for job in jobs(name, document).values()
