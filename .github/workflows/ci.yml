@@ -52,7 +52,7 @@ jobs:
       # match that workflow's field for field.
       - name: Generate coverage
         if: github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/generate-coverage@3822201c597078a5ed1939bdf067fe06a3d78a9d
+        uses: leynos/shared-actions/.github/actions/generate-coverage@2a910bfcfd1ea4216419f9290331785f05b33320
         with:
           language: python
           output-path: coverage.xml
