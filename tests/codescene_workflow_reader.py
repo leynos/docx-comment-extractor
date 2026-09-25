@@ -305,6 +305,8 @@ def holding_job(name: str, document: Document, step: Step) -> dict[str, object]:
 
     Raises
     ------
+    WorkflowError
+        If the document's jobs are malformed; see `jobs`.
     StopIteration
         If no job in the document holds this step object.
 
