@@ -486,6 +486,13 @@ quality gates.
 - 2026-08-15: Use same-directory temporary files and atomic replacement for
   output writes; the delivered outcome preserves an existing output file when
   writing or replacement fails.
+- 2026-09-26: Resolve the `docs/documentation-style-guide.md` rebase conflict in
+  favour of the branch's concrete `` `color` `` example. Main reworded the line
+  to "library using American spelling" purely to dodge the shared dictionary;
+  the branch supersedes that workaround with a narrow, deliberate spelling
+  exception (`patterns.ignore = ['`color`']`), which `generate_typos_config.py`
+  merges into `typos.toml`. Adopting main's wording would have orphaned that
+  exception as dead configuration.
 
 ## Outcomes & Retrospective
 
@@ -507,3 +514,14 @@ The most useful implementation lessons were:
 Review follow-up hardened the loader and output boundaries, added regression
 coverage for user-facing validation, documented the development architecture,
 and made operational decisions observable without exposing document payloads.
+
+The branch was later rebased onto a `main` that had adopted CodeScene coverage
+publication and dependabot action bumps. Two conflicts arose, both resolved by
+keeping the branch's intent and folding in main's improvements: the `dev`
+dependency group now carries main's `pyyaml`, `ty`, and `ruff==0.16.8` bump
+alongside the branch's `pytest-bdd` and `syrupy`, and the style-guide spelling
+line kept the branch's concrete example. `uv.lock` was rebuilt after the merge.
+Note that `make lint` and `make check-fmt` pin ruff to 0.14.13 in the `Makefile`
+independently of the `pyproject.toml` dev-group version, so the 0.16.8 bump does
+not change what those gates enforce; CI runs only `make check-fmt`,
+`make lint`, `make spelling`, and `make typecheck`.
