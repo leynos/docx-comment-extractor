@@ -16,6 +16,7 @@ dev = [
     "pytest-xdist",
     "pyyaml>=6.0.3,<7.0",
     "ty>=0.0.82,<0.1.0",
+    "packaging>=26.3,<27.0",
 ]
 
 [tool.ruff]
