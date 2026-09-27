@@ -1,12 +1,15 @@
-"""Contract: each coverage run sets up a Python the project accepts.
+"""Contract: each coverage call measures on a Python the project accepts.
 
 generate-coverage builds its coverage environment on the Python the job put on
 ``PATH`` when nothing more specific names one. If ``actions/setup-python``
 installs a version outside ``requires-python``, ``uv sync`` refuses the
-interpreter and the coverage step fails. So every job that runs
-generate-coverage must set Python up before that step, in the same job, and
-only with versions the project accepts. A setup step in another job, or after
-the coverage step, puts nothing on the coverage step's ``PATH``.
+interpreter and the coverage step fails; and if the two lanes measure on
+different Pythons, the pull-request ratchet compares figures that are not
+comparable. So every generate-coverage call must follow, in its own job, a
+``setup-python`` step naming a version the project accepts, and every call in
+both lanes must measure on one version. The Python a call measures on is the
+one the most recent setup before it put on ``PATH``; a setup in another job,
+or after the call, does not count.
 """
 
 from __future__ import annotations
@@ -49,8 +52,14 @@ def requires_python(pyproject: str) -> SpecifierSet:
     return SpecifierSet(tomllib.loads(pyproject)["project"]["requires-python"])
 
 
-def coverage_setups(workflow: str) -> dict[str, list[str]]:
-    """Map each coverage job to the Python versions set up before its coverage step.
+def coverage_pythons(workflow: str) -> list[tuple[str, str]]:
+    """Return the Python on ``PATH`` at every generate-coverage step.
+
+    Each job's steps are read in order. A ``setup-python`` step puts its
+    ``python-version`` on ``PATH`` for the steps after it, replacing any
+    earlier one, so each coverage call measures on the most recent setup before
+    it in the same job. A setup in another job, or after the call, does not
+    count.
 
     Parameters
     ----------
@@ -59,26 +68,23 @@ def coverage_setups(workflow: str) -> dict[str, list[str]]:
 
     Returns
     -------
-    dict of str to list of str
-        For every job with a generate-coverage step, the ``python-version`` of
-        each ``setup-python`` step that precedes it in that job.
+    list of tuple of (str, str)
+        One ``(job, version)`` pair per coverage call, in workflow order. The
+        version is empty when no setup precedes the call in its job, or the
+        setup names no ``python-version``.
 
     """
     document = yaml.safe_load(workflow)
-    setups: dict[str, list[str]] = {}
+    runs: list[tuple[str, str]] = []
     for name, job in document.get("jobs", {}).items():
-        steps = [str(step.get("uses", "")) for step in job.get("steps", [])]
-        coverage = [
-            index for index, uses in enumerate(steps) if GENERATE_COVERAGE in uses
-        ]
-        if not coverage:
-            continue
-        setups[name] = [
-            str(step.get("with", {}).get("python-version", ""))
-            for step in job["steps"][: coverage[0]]
-            if str(step.get("uses", "")).startswith(SETUP_PYTHON)
-        ]
-    return setups
+        on_path = ""
+        for step in job.get("steps", []):
+            uses = str(step.get("uses", ""))
+            if uses.startswith(SETUP_PYTHON):
+                on_path = str((step.get("with") or {}).get("python-version") or "")
+            elif GENERATE_COVERAGE in uses:
+                runs.append((name, on_path))
+    return runs
 
 
 def rejected_versions(accepted: SpecifierSet, requested: list[str]) -> list[str]:
@@ -101,43 +107,51 @@ def rejected_versions(accepted: SpecifierSet, requested: list[str]) -> list[str]
 
 
 @pytest.mark.parametrize("lane", LANES)
-def test_each_coverage_job_sets_up_a_python_the_project_accepts(lane: str) -> None:
-    """Every coverage job sets Python up first, and only within ``requires-python``."""
+def test_each_coverage_call_measures_on_a_python_the_project_accepts(
+    lane: str,
+) -> None:
+    """Every coverage call measures on a named Python within ``requires-python``."""
     accepted = requires_python((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     workflow = (ROOT / ".github" / "workflows" / lane).read_text(encoding="utf-8")
-    setups = coverage_setups(workflow)
+    runs = coverage_pythons(workflow)
 
-    assert setups, f"{lane} must run generate-coverage"
-    for job, requested in setups.items():
-        assert requested, f"{lane}:{job} must set up Python before generate-coverage"
-        assert rejected_versions(accepted, requested) == [], (
-            f"{lane}:{job} sets up {requested}, outside requires-python {accepted}"
-        )
+    assert runs, f"{lane} must run generate-coverage"
+    unnamed = [job for job, version in runs if not version]
+    assert unnamed == [], (
+        f"{lane}: these jobs reach generate-coverage without a setup-python "
+        f"step naming a python-version: {unnamed}"
+    )
+    requested = [version for _job, version in runs]
+    assert rejected_versions(accepted, requested) == [], (
+        f"{lane} measures on {requested}, outside requires-python {accepted}"
+    )
 
 
 def test_both_lanes_measure_on_one_python() -> None:
     """The pull-request ratchet compares against a baseline measured on the same Python.
 
     A figure measured on one interpreter is not comparable with one measured on
-    another, so every coverage job in both lanes sets up one version.
+    another, so every coverage call in both lanes measures on one version.
     """
     requested = {
         version
         for lane in LANES
-        for versions in coverage_setups(
+        for _job, version in coverage_pythons(
             (ROOT / ".github" / "workflows" / lane).read_text(encoding="utf-8")
-        ).values()
-        for version in versions
+        )
     }
 
-    assert len(requested) == 1, f"coverage lanes set up {sorted(requested)}"
+    assert len(requested) == 1, f"coverage lanes measure on {sorted(requested)}"
 
 
 def _workflow(jobs: dict[str, list[dict[str, object]]]) -> str:
     """Render a workflow with the given jobs' steps."""
-    return yaml.safe_dump({
-        "jobs": {name: {"steps": steps} for name, steps in jobs.items()}
-    })
+    # Keep the jobs in the order given: a setup in an earlier job must not
+    # leak into a later one, and sorting would put "cov" before "other".
+    return yaml.safe_dump(
+        {"jobs": {name: {"steps": steps} for name, steps in jobs.items()}},
+        sort_keys=False,
+    )
 
 
 def _setup(version: str) -> dict[str, object]:
@@ -148,18 +162,30 @@ def _setup(version: str) -> dict[str, object]:
 @pytest.mark.parametrize(
     ("jobs", "expected"),
     [
-        ({"cov": [_setup("3.14"), COVERAGE]}, {"cov": ["3.14"]}),
-        ({"cov": [COVERAGE, _setup("3.14")]}, {"cov": []}),
-        ({"other": [_setup("3.14")], "cov": [COVERAGE]}, {"cov": []}),
-        ({"lint": [_setup("3.14")]}, {}),
+        ({"cov": [_setup("3.14"), COVERAGE]}, [("cov", "3.14")]),
+        ({"cov": [COVERAGE, _setup("3.14")]}, [("cov", "")]),
+        ({"other": [_setup("3.14")], "cov": [COVERAGE]}, [("cov", "")]),
+        ({"lint": [_setup("3.14")]}, []),
+        (
+            {"cov": [_setup("3.13"), COVERAGE, _setup("3.14"), COVERAGE]},
+            [("cov", "3.13"), ("cov", "3.14")],
+        ),
+        ({"cov": [SETUP, COVERAGE]}, [("cov", "")]),
     ],
-    ids=["before-in-job", "after-the-step", "another-job", "no-coverage-job"],
+    ids=[
+        "before-in-job",
+        "after-the-step",
+        "another-job",
+        "no-coverage-job",
+        "latest-setup-per-call",
+        "setup-without-version",
+    ],
 )
-def test_only_setups_before_the_coverage_step_count(
-    jobs: dict[str, list[dict[str, object]]], expected: dict[str, list[str]]
+def test_each_call_reads_the_latest_setup_before_it(
+    jobs: dict[str, list[dict[str, object]]], expected: list[tuple[str, str]]
 ) -> None:
-    """A setup step counts only when it runs before coverage in the same job."""
-    assert coverage_setups(_workflow(jobs)) == expected
+    """A call measures on its job's most recent named setup, or on nothing."""
+    assert coverage_pythons(_workflow(jobs)) == expected
 
 
 @pytest.mark.parametrize(
