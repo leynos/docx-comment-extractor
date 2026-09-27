@@ -115,6 +115,24 @@ def test_each_coverage_job_sets_up_a_python_the_project_accepts(lane: str) -> No
         )
 
 
+def test_both_lanes_measure_on_one_python() -> None:
+    """The pull-request ratchet compares against a baseline measured on the same Python.
+
+    A figure measured on one interpreter is not comparable with one measured on
+    another, so every coverage job in both lanes sets up one version.
+    """
+    requested = {
+        version
+        for lane in LANES
+        for versions in coverage_setups(
+            (ROOT / ".github" / "workflows" / lane).read_text(encoding="utf-8")
+        ).values()
+        for version in versions
+    }
+
+    assert len(requested) == 1, f"coverage lanes set up {sorted(requested)}"
+
+
 def _workflow(jobs: dict[str, list[dict[str, object]]]) -> str:
     """Render a workflow with the given jobs' steps."""
     return yaml.safe_dump({
