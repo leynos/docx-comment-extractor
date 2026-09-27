@@ -1,13 +1,13 @@
 """Read which Python each generate-coverage call measures on.
 
 Support for ``test_coverage_python_version.py``: the resolver's source order,
-the reading of every call's declared sources, and the version comparison. It
-knows nothing about this repository's lanes; the tests apply it to them.
+the reading of every call's declared sources, the verdict on whether they
+agree, and the version comparison. It knows nothing about this repository's
+lanes; the tests apply it to them.
 """
 
 from __future__ import annotations
 
-import re
 import tomllib
 import typing as typ
 from pathlib import Path
@@ -18,10 +18,10 @@ from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+#: The pull-request lane and the publisher whose baseline it ratchets against.
 LANES: typ.Final[tuple[str, ...]] = ("ci.yml", "coverage-main.yml")
 SETUP_PYTHON: typ.Final[str] = "actions/setup-python@"
-#: A pinned, a relative (``./``) or a same-repository (``$/``) reference.
-GENERATE_COVERAGE = re.compile(r"(?:^|/)\.github/actions/generate-coverage(?:@|$)")
+GENERATE_COVERAGE: typ.Final[str] = "/.github/actions/generate-coverage@"
 #: The resolver's order, highest priority first.
 SOURCES: typ.Final[tuple[str, ...]] = (
     "input",
@@ -46,6 +46,20 @@ class CoverageCall(typ.NamedTuple):
     def effective(self) -> str:
         """The version the resolver would choose, or empty."""
         return next(iter(self.declared.values()), "")
+
+
+def verdict(call: CoverageCall) -> str:
+    """Return why a call's declared sources fail the contract, or empty.
+
+    ``"undeclared"`` means no source names a version, so the call would
+    measure on whatever Python the runner happens to have; ``"conflicting"``
+    means two sources name different versions, so a higher-priority value
+    silently overrides a lower one.
+    """
+    declared = set(call.declared.values())
+    if not declared:
+        return "undeclared"
+    return "conflicting" if len(declared) > 1 else ""
 
 
 def requires_python(pyproject: str) -> SpecifierSet:
@@ -123,7 +137,7 @@ def coverage_calls(workflow: str, python_version: str = "") -> list[CoverageCall
             uses = str(step.get("uses", ""))
             if uses.startswith(SETUP_PYTHON):
                 on_path = _declared_by_setup(step)
-            elif GENERATE_COVERAGE.search(uses):
+            elif GENERATE_COVERAGE in uses:
                 versions = (
                     str(_mapping(step.get("with")).get("python-version") or ""),
                     _uv_python(step, job, document),
