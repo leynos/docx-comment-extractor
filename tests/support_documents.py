@@ -272,8 +272,13 @@ def build_excessive_package_members_docx(path: Path) -> Path:
     return path
 
 
-def build_high_compression_ratio_docx(path: Path) -> Path:
-    """Create a small ZIP package with a disproportionately large member.
+def build_oversized_uncompressed_docx(path: Path) -> Path:
+    """Create a small ZIP package whose member exceeds the uncompressed budget.
+
+    The member is highly compressible, so the package stays tiny on disk even
+    though its declared uncompressed size is large. That is exactly the case
+    ``_validate_package_limits`` must catch from ZIP metadata alone, before any
+    member is read into memory.
 
     Parameters
     ----------
@@ -317,7 +322,7 @@ def build_fixture(name: str, path: Path) -> Path:
         "inline-controls": build_inline_controls_docx,
         "timezone-aware-comment": build_timezone_aware_comment_docx,
         "excessive-package-members": build_excessive_package_members_docx,
-        "high-compression-ratio": build_high_compression_ratio_docx,
+        "oversized-uncompressed": build_oversized_uncompressed_docx,
     }
     return builders[name](path)
 
