@@ -124,7 +124,7 @@ def test_extract_document_rejects_oversized_packages(
             "too many members",
         ),
         (
-            "high-compression-ratio",
+            "oversized-uncompressed",
             "MAX_UNCOMPRESSED_BYTES",
             1024,
             "uncompressed content is too large",
@@ -295,7 +295,14 @@ def test_extract_paragraph_block_rejects_markers_without_identifiers(
 
 @pytest.mark.parametrize(
     ("style_name", "expected_level"),
-    [("Heading 1", 1), ("Heading2", 2), ("Heading 3", 3), ("Heading6", 6)],
+    [
+        ("Heading 1", 1),
+        ("Heading2", 2),
+        ("Heading 3", 3),
+        ("Heading 4", 4),
+        ("Heading5", 5),
+        ("Heading6", 6),
+    ],
 )
 def test_heading_level_for_word_style(
     style_name: str,
