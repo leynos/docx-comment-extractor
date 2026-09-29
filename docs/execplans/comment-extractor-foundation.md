@@ -493,6 +493,18 @@ quality gates.
   exception (`patterns.ignore = ['`color`']`), which `generate_typos_config.py`
   merges into `typos.toml`. Adopting main's wording would have orphaned that
   exception as dead configuration.
+- 2026-09-29: Restack onto the advanced `origin/main` (`39d476d`), which had
+  gained a coverage-interpreter contract and action bumps since the previous
+  rebase. Two conflicts arose and both preserve intent on each side. The
+  `pyproject.toml` `dev` group takes the union: main's
+  `packaging>=26.3,<27.0` plus the branch's `pytest-bdd`, `syrupy`, and
+  `lxml-stubs`. `docs/developers-guide.md` was an add/add conflict because
+  both branches independently created it; the resolution keeps the branch's
+  six-section guide verbatim, adopts main's introductory sentence, and
+  appends main's `## Coverage workflow contract` section last, which places it
+  after every line the branch's later commits touch so they replay without
+  further conflict. `uv.lock` was regenerated afterwards, moving `packaging`
+  from 26.0 to 26.3 because the merged pin excludes 26.0.
 
 ## Outcomes & Retrospective
 
@@ -525,3 +537,18 @@ Note that `make lint` and `make check-fmt` pin ruff to 0.14.13 in the `Makefile`
 independently of the `pyproject.toml` dev-group version, so the 0.16.8 bump does
 not change what those gates enforce; CI runs only `make check-fmt`,
 `make lint`, `make spelling`, and `make typecheck`.
+
+A second rebase followed the same pattern once `main` advanced again to
+`39d476d`. The add/add conflict on `docs/developers-guide.md` confirmed that
+the two documents are complementary rather than competing: main documents the
+coverage-interpreter contract, whilst the branch documents development setup,
+dependencies, command flow, extraction and rendering boundaries, testing
+strategy, and observability. Recording both in one file keeps the single
+entry point that `README.md` links.
+
+The rebase also demonstrated a recurring maintenance cost worth naming: the
+generated `typos.toml` is rewritten whenever the `spelling` gate runs, because
+`scripts/generate_typos_config.py` performs a conditional HTTPS fetch of the
+shared dictionary. A rebase therefore tends to carry an incidental
+`typos.toml` refresh alongside its intended changes, which is best committed
+separately so the substantive diff stays legible.
