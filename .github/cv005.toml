@@ -1,1 +1,12 @@
 repository = "leynos/docx-comment-extractor"
+
+# What the ratchet baseline measures: the publisher's generator must carry
+# exactly these inputs, and every lane must measure the same selection.
+[selection]
+language = "python"
+output-path = "coverage.xml"
+format = "cobertura"
+python-source = "docx_comment_extractor"
+baseline-python-file = ".coverage-baseline.python"
+pytest-workers = ""
+with-ratchet = "true"

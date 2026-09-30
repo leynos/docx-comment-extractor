@@ -26,7 +26,9 @@ which runs `cv005-contracts check`, the shared contract library in
 `leynos/shared-actions` (`packages/cv005-contracts`), from a full commit named by
 `CV005_CONTRACTS_REF` in the Makefile; CI runs it as its own step. A fix to the
 rules is therefore a pin bump. The target needs `uv`, which fetches the Python
-3.13 the library runs under. The repository's only parameter is `repository` in
-`.github/cv005.toml`. The clauses are described in the [scripting
+3.13 the library runs under. The repository's parameters are in
+`.github/cv005.toml`: its `repository` name and the `[selection]` inputs the
+baseline measures, which the publisher's generator must carry and every
+pull-request lane must match. The clauses are described in the [scripting
 standards](scripting-standards.md), and the library's own suite proves each one,
 so this repository keeps no copy of the readers or the refusal cases.
