@@ -549,6 +549,32 @@ quality gates.
   size check alone accepts a small archive that expands enormously, so these
   metadata checks reject such packages before they are loaded.
 
+- 2026-10-03: Third restack attempt against `origin/main` resolved to an
+  explicit no-op. The target was still `057d323`, which is exactly the
+  boundary the previous restack replayed onto, so `OLD_BASE == TARGET` and
+  there were no commits to replay. The branch is 25 commits ahead, 0 behind.
+  This is the first restack with an empty range, and the earlier two both had
+  real conflicts, so "rebase again" was *not* safe to assume as a repeat of
+  that shape: an empty range is a distinct outcome that warrants a recorded
+  decision rather than a silent rewrite. The boundary was confirmed from
+  three independent sources before being accepted, on the principle that a
+  local tracking ref alone is not evidence — a lesson from the previous
+  restack, where pushes over a command-scoped SSH URL left
+  `origin/comment-extractor-foundation` stale. Here `git rev-parse
+  origin/main`, the GitHub API `git/ref/heads/main` and `commits/main`
+  endpoints, and the PR's `baseRefOid` all agreed on `057d323`. Because
+  nothing was replayed, no conflict resolution, no `uv lock` rebuild, and no
+  lock-file policy application arose. The four required gates were run
+  anyway, since they are a condition of the request rather than of the
+  rewrite: `check-fmt`, `test` (366 passed), `typecheck`, and `lint` were all
+  green on the unchanged candidate `7400c24`, and the tree hash
+  `45695d78e454ecd119c6590790d2a7cf14673314` was byte-identical before and
+  after. Weave did not participate: although the driver is registered
+  globally, the repository has no tracked `.gitattributes` and no
+  `.git/info/attributes`, so `git check-attr merge` reports `unspecified` for
+  every path, including `uv.lock`, and Git's built-in merge machinery with
+  `zdiff3` is what would have run.
+
 ## Outcomes & Retrospective
 
 The first release is complete. The tool now provides a single
