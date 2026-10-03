@@ -118,9 +118,11 @@ document text, comment bodies, rendered Markdown, or raw filesystem paths.
 Each CLI invocation owns an injected `OperationMetrics` instance. It maintains
 bounded counters by operation and outcome plus monotonic duration totals, with
 lock-protected records for concurrent callers. `reset()` clears an owner for
-deterministic reuse, and `snapshot()` returns a thread-safe copy. The default
-command path creates a fresh owner per invocation, so metric state is not
-shared across invocations or persisted. Failure events use stable categories,
+deterministic reuse, and `snapshot()` returns a thread-safe copy. `main` builds
+one runtime dependency bundle per invocation and passes it through the real
+Cyclopts command path, so a single owner and clock serve both the command-path
+boundaries and the terminal-failure handlers. Metric state is not shared
+across invocations or persisted. Failure events use stable categories,
 including `argument_parsing`, rather than requiring consumers to match
 free-form exception text. Metrics contain no document text, comment bodies,
 rendered Markdown, or raw filesystem paths.

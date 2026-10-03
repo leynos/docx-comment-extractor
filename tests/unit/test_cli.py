@@ -295,9 +295,9 @@ def test_main_records_cyclopts_failures_with_a_stable_category(
     assert getattr(caplog.records[0], "duration_ms", None) is not None, (
         "a parsing failure should include its command duration metric"
     )
-    assert metrics.snapshot().operation_counts == {("argument_parsing", "failure"): 1}, (
-        "the injected metrics owner should count the terminal parsing failure"
-    )
+    assert metrics.snapshot().operation_counts == {
+        ("argument_parsing", "failure"): 1
+    }, "the injected metrics owner should count the terminal parsing failure"
     assert metrics.snapshot().duration_totals_ms == {"argument_parsing": 250.0}, (
         "the injected clock should determine the recorded parsing failure duration"
     )

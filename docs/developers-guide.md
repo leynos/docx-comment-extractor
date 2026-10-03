@@ -115,8 +115,10 @@ Each CLI invocation owns an injected `OperationMetrics` instance, which keeps
 bounded counters by operation and outcome together with monotonic duration
 totals. Records are protected by a lock for concurrent callers. `reset()`
 clears an owner for deterministic reuse, and `snapshot()` returns a
-thread-safe copy. The default command path creates a fresh owner per
-invocation, so invocations do not share metric state; metrics are not
+thread-safe copy. `main` builds one runtime dependency bundle per invocation
+and passes it through the real Cyclopts command path, so a single owner and
+clock serve both the command-path boundaries and the terminal-failure
+handlers. Invocations do not share metric state, and metrics are not
 persisted. Failure events use stable categories, including
 `argument_parsing`, so consumers do not need to match free-form exception
 text.
