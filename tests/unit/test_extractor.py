@@ -49,17 +49,21 @@ def test_extract_document_uses_injected_document_loader(tmp_path: Path) -> None:
 
 def test_extract_document_wraps_loader_failures(tmp_path: Path) -> None:
     """Loader failures should cross the public API as an extraction error."""
-    document_path = tmp_path / "broken.docx"
-    document_path.touch()
+    document_path = build_fixture("simple-comment", tmp_path / "broken.docx")
+    loaded_paths: list[Path] = []
 
     def fail_to_load(path: Path) -> typ.NoReturn:
         """Simulate an unreadable document package."""
-        del path
+        loaded_paths.append(path)
         message = "storage detail"
         raise OSError(message)
 
     with pytest.raises(ExtractionError, match="Could not extract the Word document"):
         extract_document(document_path, document_loader=fail_to_load)
+
+    assert loaded_paths == [document_path], (
+        "the injected loader should be reached for a valid package"
+    )
 
 
 def _create_xml_syntax_error() -> XMLSyntaxError:
@@ -86,15 +90,19 @@ def test_extract_document_wraps_corrupt_package_failures(
     failure_factory: typ.Callable[[], Exception],
 ) -> None:
     """Known corrupt-package errors should not cross the public API boundary."""
-    document_path = tmp_path / "corrupt.docx"
-    document_path.touch()
+    document_path = build_fixture("simple-comment", tmp_path / "corrupt.docx")
+    loaded_paths: list[Path] = []
 
     def fail_to_load(path: Path) -> typ.NoReturn:
-        del path
+        loaded_paths.append(path)
         raise failure_factory()
 
     with pytest.raises(ExtractionError, match="Could not extract the Word document"):
         extract_document(document_path, document_loader=fail_to_load)
+
+    assert loaded_paths == [document_path], (
+        "the injected loader should be reached for a valid package"
+    )
 
 
 def test_extract_document_rejects_oversized_packages(

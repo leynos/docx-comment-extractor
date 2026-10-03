@@ -411,14 +411,17 @@ from scripts.package import app
 def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    # Mock external command behaviour
+    # Mock external command behaviour. The first mock only lists tags; the
+    # second covers the missing-tag creation branch under test.
     cmd_mox.mock("git").with_args("tag", "--list", "v1.2.3").returns(stdout="")
     cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=0)
 
-    # Run the code under test while shims are active
+    # Exercise the application, not git directly, while shims are active
     cmd_mox.replay()
-    local["git"]["tag", "--list", "v1.2.3"]()
-    local["git"]["tag", "v1.2.3"]()
+    app(tokens=[
+        "--bin-name", "demo", "--version", "1.2.3",
+        "--project-dir", str(tmp_path),
+    ])
     cmd_mox.verify()
 
 
