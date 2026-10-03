@@ -81,23 +81,72 @@ including cross-paragraph ranges and delimiter escaping.
 
 ## Testing strategy
 
-The test suite has three complementary layers:
+The test suite has four complementary layers:
 
 - Unit tests cover extraction, loader errors, normalized metadata, range
   boundaries, rendering, escaping, and warnings.
+- Property tests in `tests/unit/test_renderer_properties.py` search the
+  bounded input space described below.
 - Behavioural tests invoke the module entry point in a subprocess and verify
   standard streams, output files, and path-validation failures.
 - Snapshot tests preserve complete rendered output for deterministic synthetic
   fixtures and an excerpt from the supplied sample document.
 
-A future Hypothesis suite should generate fragment streams with balanced
-comment start and end boundaries, including ranges that cross paragraph
-boundaries. The reconstruction property is that every generated range closes
-exactly once, after its matching start, without losing or reordering source
-text. A separate generator should combine arbitrary text with every supported
-CriticMarkup delimiter. The escaping property is that each literal delimiter
-is neutralized whilst all non-delimiter text remains unchanged. Idempotence is
-not required because escaping an already escaped string can add backslashes.
+### Property tests
+
+`tests/unit/test_renderer_properties.py` covers two properties with Hypothesis.
+
+`test_render_preserves_source_text_and_range_structure` generates a bounded
+`DocumentModel`. Comment ranges are laid out as disjoint spans over a stream of
+fragment slots and then cut into blocks, so the generator produces ranges that
+stay open across paragraph boundaries, ranges confined to one fragment,
+adjacent ranges, empty fragments, blocks with no fragments at all, and headings
+at every level. Ranges never nest or overlap, which matches the supported range
+semantics in the design document.
+
+Two independent oracles check the rendered Markdown. The reconstruction oracle
+splits the output on the blank line between blocks, deletes only the documented
+range markers and comment bodies, and asserts that what remains is the source
+text with heading prefixes and block joins, in source order. The range oracle
+walks the output as a token stream, pairs every close with the start it belongs
+to using a stack, and asserts that each range closes exactly once, after its
+matching start, in source order.
+
+The generator avoids delimiter and ampersand characters in document text. That
+keeps the reconstruction oracle free of any escaping logic, so it cannot
+reproduce the algorithm it is checking.
+
+Three escaping properties cover `escape_criticmarkup_text`:
+
+- `test_escape_neutralizes_every_live_construct` joins arbitrary text —
+  including every CriticMarkup delimiter, Unicode, backslashes, raw HTML
+  samples, and Markdown link syntax — and asserts that no delimiter, square
+  bracket, entity, or complete raw HTML tag survives unguarded.
+- `test_escape_preserves_text_outside_documented_transformations` inverts the
+  documented escapes and asserts the original text is recovered.
+- `test_escape_leaves_inert_text_untouched` asserts that text built only from
+  characters used by no escape sequence is returned byte for byte, backslashes
+  included.
+
+Limits of the coverage. The round-trip oracle uses an alphabet without
+backslashes, because an input that already contains an escape sequence cannot
+be recovered unambiguously by inverting the documented transformations; text
+that already carries escapes is covered by the neutralization and inert-text
+properties instead. Neutralization is checked soundly rather than completely: a
+delimiter preceded by a source backslash is accepted as already guarded.
+Idempotence is deliberately not asserted, because escaping an already escaped
+string can add backslashes. The reconstruction generator does not model nested
+or overlapping ranges, which the extractor does not produce. Consequently the
+order in which the renderer emits several comment ends attached to a single
+fragment is not observable under the supported semantics: ranges would have to
+share their final fragment, and sharing a slot is overlap.
+
+Each delimiter, a bare ampersand, and a raw HTML span containing a delimiter
+are pinned with `@example` in addition to being generated. Drawing them is not
+enough on every run, and a property whose sensitivity depends on the draw can
+pass a defective build by luck. The suite detects nineteen of twenty injected
+defects in `renderer.py` on every run; the twentieth is the unobservable case
+above.
 
 ## Structured observability
 

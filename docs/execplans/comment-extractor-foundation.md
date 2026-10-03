@@ -252,6 +252,30 @@ Add focused tests for:
 - renderer whitespace handling around highlighted spans, and
 - warning generation for unsupported body features.
 
+### Property tests
+
+Delivered after the initial release, as a follow-up to the 2026-07-23 decision
+log entry. `tests/unit/test_renderer_properties.py` adds a bounded Hypothesis
+suite with two properties.
+
+Reconstruction generates a `DocumentModel` by laying disjoint comment ranges
+over a stream of fragment slots and cutting that stream into blocks, so
+generated documents include cross-paragraph ranges, single-fragment ranges,
+adjacent ranges, empty fragments, fragment-free blocks, and headings at every
+level. Two oracles check the rendered Markdown independently of the renderer:
+one asserts that removing only the documented markers and comment bodies leaves
+the source text with heading prefixes and block joins in source order, and the
+other asserts that each range closes exactly once, after its matching start.
+
+Escaping is covered by three properties over `escape_criticmarkup_text`:
+arbitrary text containing every supported delimiter, Unicode, backslashes, raw
+HTML, and Markdown link syntax must leave no live construct unguarded;
+inverting the documented transformations must recover the original text; and
+text built only from non-escapable characters must be returned unchanged.
+
+`hypothesis` was added to the `dev` dependency group and `uv.lock` regenerated
+with `uv lock`, following the repository's dependency workflow.
+
 ### Fixtures
 
 Use a mix of:
@@ -483,6 +507,10 @@ quality gates.
   outcome, error-class, and count fields. Exclude source payloads and raw paths.
 - 2026-07-23: Recommend future property-based tests for balanced cross-paragraph
   ranges and CriticMarkup escaping without asserting false idempotence.
+  **Delivered 2026-10-03** in `tests/unit/test_renderer_properties.py` with
+  Hypothesis added to the `dev` dependency group. The recommendation to avoid a
+  false idempotence assertion is honoured: idempotence is not asserted
+  anywhere, and the guide and design document record why.
 - 2026-08-15: Use same-directory temporary files and atomic replacement for
   output writes; the delivered outcome preserves an existing output file when
   writing or replacement fails.
@@ -574,6 +602,69 @@ quality gates.
   `.git/info/attributes`, so `git check-attr merge` reports `unspecified` for
   every path, including `uv.lock`, and Git's built-in merge machinery with
   `zdiff3` is what would have run.
+
+- 2026-10-03: Close the "Testing (Property / Proof)" pre-merge warning by
+  delivering the property tests the 2026-07-23 entry recommended, rather than
+  by arguing the warning down. Three design points were settled by experiment
+  before the suite was written, and each changed the result.
+
+  *The reconstruction oracle must not carry escaping logic.* Generated document
+  text avoids delimiter and ampersand characters, so the oracle that removes
+  markers and comment bodies needs no inverse of `escape_criticmarkup_text`.
+  Had the generated text contained delimiters, the oracle would have had to
+  unescape, which is the production algorithm restated.
+
+  *A round-trip oracle needs a backslash-free alphabet.* An input such as
+  `~\\>` inverts to `~>`, so a text-level round trip is ambiguous whenever the
+  input already contains a backslash before a delimiter tail. Exhaustive search
+  found 1,763 such cases over a 15-character alphabet, all of them this shape
+  and none a defect. The round trip is therefore restricted to a backslash-free
+  alphabet, backslashes are covered by a separate pass-through property (they
+  are returned byte for byte, since no escape sequence uses one), and
+  neutralization is checked as a soundness property that accepts a delimiter
+  preceded by a source backslash as already guarded.
+
+  *Block parts are not a reliable structural probe.* An earlier draft asserted
+  that splitting the output on the blank-line join yields one part per block.
+  That fails when a fragment-free block contributes only a heading prefix, or
+  not even that, so it was dropped in favour of the text-preservation oracle,
+  which compares the whole document at once.
+
+  Both oracles were validated by exhaustive and randomized search before being
+  committed: roughly 1.1 million exhaustive strings for escaping and 30,000
+  generated documents for reconstruction, covering 45,366 ranges (7,343 of them
+  cross-paragraph), 44,902 empty fragments, and 7,546 fragment-free blocks.
+
+  *The suite was mutation-tested, and that found generator gaps rather than
+  production defects.* Twenty deliberate defects were injected into
+  `renderer.py` one at a time. The first pass missed three, and each miss was a
+  real weakness in what the generator could reach, not a defect in the
+  renderer:
+
+  - Dropping the '&' escape rule was invisible because '&' is not in the inert
+    alphabet and the only reachable ampersand came from an `&lt;` sample that
+    was already entity-shaped. Bare and entity-shaped ampersands are now drawn
+    explicitly.
+  - Swapping the order of the two escape layers was invisible because no
+    generated input put a delimiter inside a raw HTML span. Exhaustive search
+    confirms the order is observable — 6,260 strings over a small alphabet
+    distinguish it, all of the shape `<a~>` where the span swallows the
+    delimiter before the CriticMarkup layer runs. The generator now builds tags
+    with delimiter-bearing content.
+  - Reversing `end_comment_ids` turned out to be unobservable rather than
+    merely unreached. Two ranges can share a final fragment slot only by
+    sharing that slot, which is overlap, so under the disjoint semantics the
+    extractor produces the `reversed()` call can never iterate over more than
+    one element. Enumerating every disjoint set of up to three ranges over up
+    to seven slots confirms no such set exists.
+
+  Detection was also flaky run to run, because whether a property caught a
+  given mutation depended on the random draw. Each delimiter, a bare ampersand,
+  and the order-sensitive `<a~>` shape are now pinned with `@example`, so the
+  suite is sensitive to nineteen of the twenty mutations on every run. The
+  twentieth is the unreachable one above.
+
+  No production defect was found, so `renderer.py` is unchanged by this work.
 
 ## Outcomes & Retrospective
 

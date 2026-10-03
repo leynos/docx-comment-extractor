@@ -86,10 +86,12 @@ limited to 10,000 members and 100 MiB of total uncompressed content.
 
 ## Testing strategy
 
-The test suite combines three layers:
+The test suite combines four layers:
 
 - Unit tests for model extraction, metadata normalization, escaping, warning
   generation, and rendering.
+- Hypothesis property tests for comment-range reconstruction and CriticMarkup
+  escaping, described below.
 - Behavioural `pytest-bdd` scenarios that exercise the CLI through
   `python -m docx_comment_extractor.cli`.
 - `syrupy` snapshots that lock down rendered Markdown for synthetic fixtures
@@ -99,13 +101,43 @@ Synthetic fixture documents force deterministic comment timestamps by setting a
 fixed `w:date` attribute on each generated comment. Without that override, the
 snapshot output would drift with the wall clock.
 
-A future Hypothesis suite should generate balanced comment boundaries across
-fragments and paragraphs. Each generated range must close exactly once after
-its matching start, and reconstruction must preserve source-text order. A
-second property should generate arbitrary text containing all supported
-CriticMarkup delimiters and verify that each literal delimiter is neutralized
-without changing other text. Escaping is not expected to be idempotent because
-reprocessing escaped input can add backslashes.
+### Property tests
+
+`tests/unit/test_renderer_properties.py` searches the rendering contract rather
+than sampling it.
+
+The reconstruction generator lays disjoint comment ranges over a stream of
+fragment slots and then cuts that stream into blocks, so it produces ranges
+that cross paragraph boundaries, ranges confined to a single fragment, adjacent
+ranges, empty fragments, blocks with no fragments, and headings at every level.
+Nesting and overlap are excluded, matching the range semantics recorded above.
+
+Two oracles check the rendered output independently of the renderer. The first
+removes only the documented range markers and comment bodies and asserts the
+remainder is the source text with heading prefixes and blank-line joins, in
+source order. The second walks the output as a token stream and asserts that
+every range closes exactly once, after its matching start, in source order.
+Generated document text avoids delimiter and ampersand characters, so the
+reconstruction oracle needs no escaping logic of its own.
+
+Escaping is covered by three properties: arbitrary text containing every
+supported delimiter, Unicode, backslashes, raw HTML, and Markdown link syntax
+must leave no delimiter, bracket, entity, or complete raw HTML tag unguarded;
+inverting the documented transformations must recover the original text; and
+text that contains no escapable character must be returned unchanged.
+
+The coverage has limits worth recording. The round-trip property uses an
+alphabet without backslashes, because an input already containing an escape
+sequence cannot be recovered unambiguously by inverting the documented
+transformations; such input is covered by the other two properties.
+Neutralization is checked soundly rather than completely, since a delimiter
+preceded by a source backslash is accepted as already guarded. Escaping is not
+asserted to be idempotent, because reprocessing escaped input can add
+backslashes. Because ranges are disjoint, the order in which several comment
+ends attached to one fragment are emitted is not observable: disjoint ranges
+cannot share their final fragment. Delimiters, a bare ampersand, and a raw HTML
+span containing a delimiter are pinned with `@example` as well as generated, so
+sensitivity does not depend on the random draw.
 
 ## Observability
 
