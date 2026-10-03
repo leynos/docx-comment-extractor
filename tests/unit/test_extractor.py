@@ -5,9 +5,11 @@ from __future__ import annotations
 import datetime as dt
 import typing as typ
 import zlib
+from zipfile import BadZipFile
 
 import pytest
 from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from lxml import etree
@@ -103,6 +105,23 @@ def test_extract_document_wraps_corrupt_package_failures(
     assert loaded_paths == [document_path], (
         "the injected loader should be reached for a valid package"
     )
+
+
+def test_infrastructure_errors_names_every_translated_vendor_failure() -> None:
+    """The extraction boundary should translate the full vendor failure set."""
+    # The loader path and the package-size path share this tuple, so narrowing
+    # it would silently let a vendor exception escape as a traceback.
+    assert set(extractor.INFRASTRUCTURE_ERRORS) == {
+        BadZipFile,
+        EOFError,
+        KeyError,
+        OSError,
+        PackageNotFoundError,
+        RuntimeError,
+        ValueError,
+        XMLSyntaxError,
+        zlib.error,
+    }, "the boundary should translate every known vendor failure type"
 
 
 def test_extract_document_rejects_oversized_packages(

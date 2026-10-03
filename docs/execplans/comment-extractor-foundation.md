@@ -529,7 +529,25 @@ quality gates.
   closure, and the command reuses the public `extract_comments` docstring for
   help text. One owner and one clock now serve both the command path and the
   terminal-failure handlers, which removes the previously dead injected
-  `metrics`/`clock` parameters.
+  `metrics`/`clock` parameters. `_production_dependencies` is the single place
+  that chooses the concrete metrics owner and clock, so `extract_comments`
+  constructs neither: it delegates the default policy to that factory. The
+  standard-output write is also a `_RuntimeDependencies.stdout` seam rather
+  than a direct `sys.stdout` call.
+
+- 2026-10-03: Declare `lxml` as a direct runtime dependency. The plan named
+  only `python-docx`, `cyclopts`, and `rich`, but the extraction boundary must
+  catch `XMLSyntaxError` from `lxml.etree` when a malformed OOXML package
+  fails to parse, and translate it into `ExtractionError`. Relying on the
+  transitive copy pulled in by `python-docx` would leave the import working but
+  undeclared.
+
+- 2026-10-03: Validate ZIP package metadata before extraction:
+  `MAX_PACKAGE_MEMBERS` rejects packages with more than 10,000 members and
+  `MAX_UNCOMPRESSED_BYTES` rejects packages whose declared uncompressed content
+  exceeds 100 MiB. The plan did not address decompressed size, and an on-disk
+  size check alone accepts a small archive that expands enormously, so these
+  metadata checks reject such packages before they are loaded.
 
 ## Outcomes & Retrospective
 

@@ -29,6 +29,21 @@ MAX_PACKAGE_MEMBERS = 10_000
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 WORD_HEADING_STYLE_RE = re.compile(r"^Heading ?(?P<level>[1-6])$")
 
+# Single definition of the vendor failures the extraction boundary translates
+# into ``ExtractionError``. Keeping one tuple stops the package-size checks and
+# the document loader from drifting apart in what they consider a broken package.
+INFRASTRUCTURE_ERRORS = (
+    BadZipFile,
+    EOFError,
+    KeyError,
+    OSError,
+    PackageNotFoundError,
+    RuntimeError,
+    ValueError,
+    XMLSyntaxError,
+    zlib.error,
+)
+
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
@@ -96,17 +111,7 @@ def extract_document(
         if _is_oversized_package(path):
             _raise_oversized_package()
         _validate_package_limits(path)
-    except (
-        BadZipFile,
-        EOFError,
-        KeyError,
-        OSError,
-        PackageNotFoundError,
-        RuntimeError,
-        ValueError,
-        XMLSyntaxError,
-        zlib.error,
-    ) as error:
+    except INFRASTRUCTURE_ERRORS as error:
         _raise_extraction_error(error)
     document = _load_document_for_extraction(path, document_loader)
     comments = _extract_comments(document)
@@ -147,17 +152,7 @@ def _load_document_for_extraction(
     """Load a package while translating known infrastructure failures."""
     try:
         return document_loader(path)
-    except (
-        BadZipFile,
-        EOFError,
-        KeyError,
-        OSError,
-        PackageNotFoundError,
-        RuntimeError,
-        ValueError,
-        XMLSyntaxError,
-        zlib.error,
-    ) as error:
+    except INFRASTRUCTURE_ERRORS as error:
         _raise_extraction_error(error)
 
 
