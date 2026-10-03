@@ -27,6 +27,7 @@ dev = [
     "pytest-bdd",
     "syrupy",
     "lxml-stubs>=0.5.1",
+    "hypothesis>=6.140.0,<7.0",
 ]
 
 [tool.ruff]
