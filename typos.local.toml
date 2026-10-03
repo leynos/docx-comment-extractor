@@ -12,7 +12,8 @@ accepted = ["Flavored"]
 [words.corrections]
 
 [patterns]
-ignore = []
+# Preserve the external-identifier exception without allowing US spelling elsewhere.
+ignore = ['`color`']
 
 [files]
 exclude = []
