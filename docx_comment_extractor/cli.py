@@ -28,7 +28,7 @@ if typ.TYPE_CHECKING:
 
 STDOUT_CONSOLE = Console(file=sys.stdout)
 STDERR_CONSOLE = Console(file=sys.stderr, stderr=True)
-APP = App(help="Extract Word comments into inline CriticMarkup Markdown.")
+APP_HELP = "Extract Word comments into inline CriticMarkup Markdown."
 LOGGER = logging.getLogger(__name__)
 
 
@@ -143,9 +143,52 @@ class UserFacingError(Exception):
         )
 
 
-@APP.default
+def _command_bound_to(
+    dependencies: _RuntimeDependencies,
+) -> typ.Callable[[Path, Path | None], None]:
+    """Bind the Cyclopts command to one explicit runtime dependency bundle.
+
+    Cyclopts can only inject parsing-time values, so the per-invocation bundle
+    travels by closure instead of through ``Parameter(parse=False)``. The
+    returned callable keeps the documented ``(input_docx, output)`` signature,
+    and reuses the public command docstring that Cyclopts renders as help.
+    """
+
+    def command(input_docx: Path, output: Path | None = None) -> None:
+        _run_extraction(input_docx, output, dependencies=dependencies)
+
+    # One source of truth for the command help text; the public function is
+    # defined below and is resolved when an application is built.
+    command.__doc__ = extract_comments.__doc__
+    return command
+
+
+def _build_app(dependencies: _RuntimeDependencies) -> App:
+    """Build a Cyclopts application whose command uses ``dependencies``."""
+    app = App(help=APP_HELP)
+    app.default(_command_bound_to(dependencies))
+    return app
+
+
+def _production_dependencies(
+    metrics: OperationMetrics,
+    clock: typ.Callable[[], float],
+) -> _RuntimeDependencies:
+    """Assemble the production runtime seams for one invocation."""
+    return _RuntimeDependencies(
+        metrics=metrics,
+        output_writer=_write_output_atomically,
+        clock=clock,
+        input_validator=_validate_input_path,
+        output_validator=_validate_output_path,
+    )
+
+
 def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     """Extract inline CriticMarkup Markdown from ``input_docx``.
+
+    This is the importable command entry point. ``main`` runs the same code
+    through a Cyclopts application whose runtime seams are injected.
 
     Parameters
     ----------
@@ -171,13 +214,7 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     _run_extraction(
         input_docx,
         output,
-        dependencies=_RuntimeDependencies(
-            metrics=OperationMetrics(),
-            output_writer=_write_output_atomically,
-            clock=time.perf_counter,
-            input_validator=_validate_input_path,
-            output_validator=_validate_output_path,
-        ),
+        dependencies=_production_dependencies(OperationMetrics(), time.perf_counter),
     )
 
 
@@ -333,9 +370,11 @@ def main(
         Optional command-line argument iterable. ``None`` makes Cyclopts read
         arguments from the process command line.
     metrics
-        Optional per-invocation metrics owner for terminal failure events.
+        Optional per-invocation metrics owner. The supplied owner receives
+        every command-path and terminal-failure event for the invocation.
     clock
-        Monotonic clock used for terminal failure duration metrics.
+        Monotonic clock used for all duration metrics in the invocation,
+        including the command path and terminal failure events.
 
     Returns
     -------
@@ -351,8 +390,9 @@ def main(
     """
     command_started_at = clock()
     active_metrics = metrics or OperationMetrics()
+    app = _build_app(_production_dependencies(active_metrics, clock))
     try:
-        APP(
+        app(
             tokens=tokens,
             console=STDOUT_CONSOLE,
             error_console=STDERR_CONSOLE,

@@ -36,6 +36,13 @@ unit, behavioural, and snapshot tests. `lxml-stubs` provides XML typing for
 static analysis. Ruff provides linting and formatting, whilst the
 repository-managed `ty` tool provides static type checking.
 
+The `scripts/` directory holds the shared spelling-policy helper, whose
+modules import each other by flat top-level name. Both the
+`[tool.ty.environment] extra-paths = ["scripts"]` stanza in
+`pyproject.toml` and the `--extra-search-path scripts` flag in
+`make typecheck` put that directory on ty's module search path so those
+imports resolve.
+
 ## Command flow
 
 `docx_comment_extractor.cli` owns path validation and output selection. The

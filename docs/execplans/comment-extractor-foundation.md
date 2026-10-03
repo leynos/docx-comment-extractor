@@ -506,6 +506,11 @@ quality gates.
   further conflict. `uv.lock` was regenerated afterwards, moving `packaging`
   from 26.0 to 26.3 because the merged pin excludes 26.0.
 
+- 2026-10-03: Put `scripts/` on ty's module search path in both
+  `[tool.ty.environment] extra-paths` in `pyproject.toml` and
+  `--extra-search-path scripts` in `make typecheck`, so the spelling helper's
+  flat top-level imports resolve during type checking.
+
 ## Outcomes & Retrospective
 
 The first release is complete. The tool now provides a single

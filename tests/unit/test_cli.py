@@ -213,6 +213,19 @@ def _build_output_alias(input_path: Path, tmp_path: Path, alias_kind: str) -> Pa
     return output_path
 
 
+def _fixed_ticks_clock(ticks: tuple[float, ...]) -> typ.Callable[[], float]:
+    """Return a clock that yields ``ticks`` in order and then fails loudly."""
+
+    def clock() -> float:
+        try:
+            return remaining.pop(0)
+        except IndexError:
+            pytest.fail("the injected clock was read more times than expected")
+
+    remaining = list(ticks)
+    return clock
+
+
 def test_main_presents_extraction_errors_cleanly(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -225,14 +238,15 @@ def test_main_presents_extraction_errors_cleanly(
         raise ExtractionError(message)
 
     presented_errors: list[str] = []
-    monkeypatch.setattr(cli, "APP", fail_app)
+    metrics = cli.OperationMetrics()
+    monkeypatch.setattr(cli, "_build_app", lambda _dependencies: fail_app)
     monkeypatch.setattr(cli, "_print_error", presented_errors.append)
 
     with (
         caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"),
         pytest.raises(SystemExit, match="2"),
     ):
-        cli.main([])
+        cli.main([], metrics=metrics, clock=_fixed_ticks_clock((10.0, 10.25)))
 
     assert presented_errors == ["Could not extract the Word document."], (
         "the CLI should present extraction failures without a traceback"
@@ -242,6 +256,12 @@ def test_main_presents_extraction_errors_cleanly(
     )
     assert getattr(caplog.records[0], "error", None) == "ExtractionError", (
         "an extraction failure should expose only its safe error class"
+    )
+    assert metrics.snapshot().operation_counts == {("extraction", "failure"): 1}, (
+        "the injected metrics owner should count the terminal extraction failure"
+    )
+    assert metrics.snapshot().duration_totals_ms == {"extraction": 250.0}, (
+        "the injected clock should determine the recorded failure duration"
     )
 
 
@@ -256,14 +276,15 @@ def test_main_records_cyclopts_failures_with_a_stable_category(
         message = "invalid arguments"
         raise cli.CycloptsError(message)
 
-    monkeypatch.setattr(cli, "APP", fail_app)
+    metrics = cli.OperationMetrics()
+    monkeypatch.setattr(cli, "_build_app", lambda _dependencies: fail_app)
     monkeypatch.setattr(cli, "_print_error", lambda _message: None)
 
     with (
         caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"),
         pytest.raises(SystemExit, match="2"),
     ):
-        cli.main([])
+        cli.main([], metrics=metrics, clock=_fixed_ticks_clock((10.0, 10.25)))
 
     assert getattr(caplog.records[0], "operation", None) == "argument_parsing", (
         "a parsing failure should identify the argument-parsing operation"
@@ -273,6 +294,49 @@ def test_main_records_cyclopts_failures_with_a_stable_category(
     )
     assert getattr(caplog.records[0], "duration_ms", None) is not None, (
         "a parsing failure should include its command duration metric"
+    )
+    assert metrics.snapshot().operation_counts == {("argument_parsing", "failure"): 1}, (
+        "the injected metrics owner should count the terminal parsing failure"
+    )
+    assert metrics.snapshot().duration_totals_ms == {"argument_parsing": 250.0}, (
+        "the injected clock should determine the recorded parsing failure duration"
+    )
+
+
+def test_main_injects_one_runtime_bundle_into_the_command_path(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Command-path events should reach the metrics and clock injected into main."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    output_path = tmp_path / "output.md"
+    metrics = cli.OperationMetrics()
+
+    with (
+        caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"),
+        pytest.raises(SystemExit, match="0"),
+    ):
+        cli.main(
+            [str(input_path), str(output_path)],
+            metrics=metrics,
+            clock=_fixed_ticks_clock(
+                (10.0, 10.25, 10.5, 10.75, 11.0, 11.25, 11.5),
+            ),
+        )
+
+    snapshot = metrics.snapshot()
+    assert snapshot.operation_counts == {
+        ("validation", "success"): 1,
+        ("extraction", "success"): 1,
+        ("output_write", "success"): 1,
+    }, "every command-path boundary should record into the injected owner"
+    assert snapshot.duration_totals_ms == {
+        "validation": 250.0,
+        "extraction": 250.0,
+        "output_write": 250.0,
+    }, "the injected clock should determine every recorded boundary duration"
+    assert getattr(caplog.records[0], "duration_total_ms", None) == 250.0, (
+        "the terminal event should be the second reading of the injected clock"
     )
 
 
