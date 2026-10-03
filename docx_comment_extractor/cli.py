@@ -100,6 +100,7 @@ class _RuntimeDependencies:
     clock: typ.Callable[[], float]
     input_validator: typ.Callable[[Path], Path]
     output_validator: typ.Callable[[Path, Path], None]
+    stdout: typ.Callable[[str], object]
 
 
 class UserFacingError(Exception):
@@ -171,16 +172,23 @@ def _build_app(dependencies: _RuntimeDependencies) -> App:
 
 
 def _production_dependencies(
-    metrics: OperationMetrics,
-    clock: typ.Callable[[], float],
+    metrics: OperationMetrics | None = None,
+    clock: typ.Callable[[], float] | None = None,
 ) -> _RuntimeDependencies:
-    """Assemble the production runtime seams for one invocation."""
+    """Assemble the production runtime seams for one invocation.
+
+    This is the only place that decides which concrete metrics owner and clock
+    an invocation uses, so the command path and the terminal-failure handlers
+    cannot diverge. ``main`` passes its injected seams through; callers that
+    supply nothing get the production defaults.
+    """
     return _RuntimeDependencies(
-        metrics=metrics,
+        metrics=metrics or OperationMetrics(),
         output_writer=_write_output_atomically,
-        clock=clock,
+        clock=clock or time.perf_counter,
         input_validator=_validate_input_path,
         output_validator=_validate_output_path,
+        stdout=sys.stdout.write,
     )
 
 
@@ -188,7 +196,9 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     """Extract inline CriticMarkup Markdown from ``input_docx``.
 
     This is the importable command entry point. ``main`` runs the same code
-    through a Cyclopts application whose runtime seams are injected.
+    through a Cyclopts application whose runtime seams are injected. Calling it
+    directly uses default seams and exists so tests and embedders have a plain
+    synchronous entry point.
 
     Parameters
     ----------
@@ -214,7 +224,7 @@ def extract_comments(input_docx: Path, output: Path | None = None) -> None:
     _run_extraction(
         input_docx,
         output,
-        dependencies=_production_dependencies(OperationMetrics(), time.perf_counter),
+        dependencies=_production_dependencies(),
     )
 
 
@@ -292,7 +302,7 @@ def _write_rendered_document(
     output_write_started_at = dependencies.clock()
     try:
         if output is None:
-            sys.stdout.write(rendered.markdown)
+            dependencies.stdout(rendered.markdown)
         else:
             dependencies.output_writer(output, rendered.markdown)
     except UserFacingError:

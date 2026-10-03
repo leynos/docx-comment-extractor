@@ -186,6 +186,7 @@ def test_run_extraction_uses_the_injected_output_writer(
             clock=lambda: 0.0,
             input_validator=cli._validate_input_path,
             output_validator=cli._validate_output_path,
+            stdout=lambda _markdown: None,
         ),
     )
 
@@ -194,6 +195,32 @@ def test_run_extraction_uses_the_injected_output_writer(
     )
     assert "{==" in persisted[0][1], (
         "the injected output writer should receive rendered CriticMarkup Markdown"
+    )
+
+
+def test_run_extraction_writes_stdout_through_the_injected_stream(
+    tmp_path: Path,
+) -> None:
+    """Standard-output runs should use the injected stream, not the global."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    written: list[str] = []
+
+    cli._run_extraction(
+        input_path,
+        None,
+        dependencies=cli._RuntimeDependencies(
+            metrics=cli.OperationMetrics(),
+            output_writer=lambda _path, _markdown: None,
+            clock=lambda: 0.0,
+            input_validator=cli._validate_input_path,
+            output_validator=cli._validate_output_path,
+            stdout=written.append,
+        ),
+    )
+
+    assert len(written) == 1, "a single stdout run should write the rendered once"
+    assert "{==" in written[0], (
+        "the injected stream should receive the rendered CriticMarkup Markdown"
     )
 
 
