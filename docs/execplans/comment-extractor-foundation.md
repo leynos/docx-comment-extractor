@@ -511,6 +511,26 @@ quality gates.
   `--extra-search-path scripts` in `make typecheck`, so the spelling helper's
   flat top-level imports resolve during type checking.
 
+- 2026-10-03: Restack onto the advanced `origin/main` (`057d323`), which had
+  gained the shared CV-005 contract migration, six commits of coverage and
+  dependency bumps, and a Ruff bump to 0.16.9. Only `uv.lock` conflicted, and
+  it did so as an add/add at four separate commits because both branches added
+  the file from a base without it. Every conflict took the upstream side, per
+  the lock-file policy, and `uv lock` rebuilt the file afterwards; no hand
+  merge of lock content was attempted. `docs/scripting-standards.md`,
+  `docs/developers-guide.md`, and `pyproject.toml` auto-merged, and the
+  CV-005 text and `.github/cv005.toml` survive alongside the branch's own
+  wording.
+
+- 2026-10-03: Route the CLI's runtime seams through the real Cyclopts command
+  path. Cyclopts can only inject parsing-time values, so a
+  `Parameter(parse=False)` bundle never reaches the command; instead `main`
+  builds one `_RuntimeDependencies`, `_build_app` binds the command to it by
+  closure, and the command reuses the public `extract_comments` docstring for
+  help text. One owner and one clock now serve both the command path and the
+  terminal-failure handlers, which removes the previously dead injected
+  `metrics`/`clock` parameters.
+
 ## Outcomes & Retrospective
 
 The first release is complete. The tool now provides a single
