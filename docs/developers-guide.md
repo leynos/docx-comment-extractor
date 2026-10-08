@@ -21,14 +21,15 @@ another Python would miss its baseline rather than compare against the wrong
 one; the contract turns that silent restart into a failure. It uses
 `packaging`, a development dependency.
 
-The CodeScene coverage boundary (CV-005) is held by `make test-workflow-contracts`,
-which runs `cv005-contracts check`, the shared contract library in
-`leynos/shared-actions` (`packages/cv005-contracts`), from a full commit named by
-`CV005_CONTRACTS_REF` in the Makefile; CI runs it as its own step. A fix to the
-rules is therefore a pin bump. The target needs `uv`, which fetches the Python
-3.13 the library runs under. The repository's parameters are in
-`.github/cv005.toml`: its `repository` name and the `[selection]` inputs the
-baseline measures, which the publisher's generator must carry and every
-pull-request lane must match. The clauses are described in the [scripting
-standards](scripting-standards.md), and the library's own suite proves each one,
-so this repository keeps no copy of the readers or the refusal cases.
+The CodeScene coverage boundary (CV-005) is held by
+`make test-workflow-contracts`, which runs `cv005-contracts check`, the shared
+contract library in `leynos/shared-actions` (`packages/cv005-contracts`), from
+a full commit named by `CV005_CONTRACTS_REF` in the Makefile; CI runs it as its
+own step. A fix to the rules is therefore a pin bump. The target needs `uv`,
+which fetches the Python 3.13 the library runs under. The repository's
+parameters are in `.github/cv005.toml`: its `repository` name and the
+`[selection]` inputs the baseline measures, which the publisher's generator
+must carry and every pull-request lane must match. The clauses are described in
+the [scripting standards](scripting-standards.md), and the library's own suite
+proves each one, so this repository keeps no copy of the readers or the refusal
+cases.
