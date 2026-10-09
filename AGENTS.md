@@ -142,7 +142,8 @@ When implementing changes, adhere to the following testing procedures:
   release CI installs); install it once with
   `cargo install --locked mdtablefix --version 0.6.1`. `make fmt` also runs
   `markdownlint-cli2`, which CI provides through its GitHub action; locally
-  install it with `bun install -g markdownlint-cli2` (or `npm install -g`).
+  install it with `bun install -g markdownlint-cli2` (or
+  `npm install -g markdownlint-cli2`).
 - Validate Markdown files using `make markdownlint`.
 - Run `make fmt` after any documentation changes to format all Markdown
   files and fix table markup.

@@ -8,7 +8,7 @@ MDTABLEFIX ?= mdtablefix
 MDTABLEFIX_SELECT = --git --include-untracked
 MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 NIXIE ?= nixie
-TOOLS = ty $(MDLINT) uv
+TOOLS = ty $(MDLINT) $(MDTABLEFIX) uv
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 
@@ -80,13 +80,13 @@ $(VENV_TOOLS): ## Verify required CLI tools in venv
 	$(call ensure_tool_venv,$@)
 endif
 
-fmt: ## Format sources
+fmt: $(MDTABLEFIX) $(MDLINT) ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
 	$(MDTABLEFIX) --in-place $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 	$(MDLINT) --fix "**/*.md"
 
-check-fmt: ## Verify formatting
+check-fmt: $(MDTABLEFIX) ## Verify formatting
 	$(RUFF) format --check
 	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
