@@ -118,10 +118,26 @@ PINNED_AMPERSANDS = ("&", "&x", "&amp;")
 # A source backslash immediately before a bracket: the added escape must leave
 # an odd-length backslash run, or a CommonMark reader sees an active link.
 PINNED_BACKSLASH_LINK = r"\[run\](https://example.org)"
+# Unmatched HTML-block openers a CommonMark reader promotes to a block at a line
+# start. Each is a variant an earlier guard missed: an indented opener, an
+# uppercase one, one after a Word line break, and one split across Word runs, so
+# that the reassembled text is never the string either fragment held.
+PINNED_UNMATCHED_OPENERS = (
+    " <script",
+    "<SCRIPT",
+    "safe\n<script",
+    "safe\n<!--",
+    "<scr\nipt",
+    " <script\n{==x==}{>>note<<}",
+)
 
 # Composition text is drawn from the reactive characters themselves, so that
-# adjacent fragments can reassemble a construct neither fragment contains.
-COMPOSITION_CHARACTERS = "<>[](){}=+~-\\/!&abc"
+# adjacent fragments can reassemble a construct neither fragment contains. The
+# line-feed is included because a Word line break reaches the renderer as
+# ``"\n"`` and leaves a real line start behind, which is where CommonMark
+# promotes an unmatched HTML-block opener into a block that swallows the
+# renderer's own markers. The letters are the ones that spell a block tag name.
+COMPOSITION_CHARACTERS = "<>[](){}=+~-\\/!&\nabcdeilnoprstuvxyz"
 
 
 def _assert_no_live_construct(escaped: str) -> None:
@@ -596,6 +612,7 @@ def test_escape_leaves_inert_text_untouched(text: str) -> None:
 @example(text="".join(PINNED_AMPERSANDS))
 @example(text="".join(PINNED_DELIMITERS) + PINNED_ORDER_SENSITIVE)
 @example(text=PINNED_BACKSLASH_LINK)
+@example(text="".join(PINNED_UNMATCHED_OPENERS))
 @given(text=st.lists(_untrusted_fragments(), max_size=8).map("".join))
 def test_escape_neutralizes_every_live_construct(text: str) -> None:
     """No delimiter, bracket, entity, or raw HTML tag should stay live.

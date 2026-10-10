@@ -129,7 +129,8 @@ for the provided sample file.
 - Risk: CLI output will be hard to trust without approved fixture output.
   Severity: medium Likelihood: high Mitigation: create small synthetic `.docx`
   fixtures in tests for single-run, multi-run, and cross-paragraph cases, then
-  add the supplied sample document as a smoke fixture.
+  add the supplied sample document as a manual smoke check. It is not in the
+  repository, so it cannot back a committed fixture or snapshot.
 
 ## Proposed architecture
 
@@ -255,25 +256,26 @@ Add focused tests for:
 
 Delivered after the initial release, as a follow-up to the 2026-07-23 decision
 log entry. `tests/unit/test_renderer_properties.py` adds a bounded Hypothesis
-suite with five properties.
+suite with six properties.
 
 Reconstruction generates a `DocumentModel` by laying disjoint comment ranges
 over a stream of fragment slots and cutting that stream into blocks, so
 generated documents include cross-paragraph ranges, single-fragment ranges,
 adjacent ranges, empty fragments, fragment-free blocks, and headings at every
-level. Two oracles check the rendered Markdown independently of the renderer:
+level. Three oracles check the rendered Markdown independently of the renderer:
 one asserts that removing only the documented markers and comment bodies leaves
-the source text with heading prefixes and block joins in source order, and the
-other asserts that each range closes exactly once, after its matching start.
+the source text with heading prefixes and block joins in source order, another
+asserts that each range closes exactly once, after its matching start, and the
+third asserts each rendered highlight encloses exactly its own source span.
 
 Escaping is covered by four properties over `escape_criticmarkup_text`:
 arbitrary text containing every supported delimiter, Unicode, backslashes, raw
 HTML, and Markdown link syntax must leave no live construct unguarded;
 inverting the documented transformations must recover the original text; text
 built only from non-escapable characters must be returned unchanged; and the
-number of `<` and `>` characters escaping consumes must equal the number of raw
-HTML tags matched in the input, counted from the input rather than searched in
-the output.
+brackets escaping consumes must equal the raw HTML tags it matched plus the
+block openers it guarded, counted from the input rather than searched in the
+output.
 
 `hypothesis` was added to the `dev` dependency group and `uv.lock` regenerated
 with `uv lock`, following the repository's dependency workflow.
@@ -283,13 +285,14 @@ with `uv lock`, following the repository's dependency workflow.
 Use a mix of:
 
 - tiny synthetic `.docx` fixtures created in tests using `python-docx`,
-- approved expected Markdown snapshots stored under `tests/fixtures/`, and
-- the provided `commented-pentagon-draft-sam-c.docx` as a smoke and regression
-  fixture.
+- approved expected Markdown snapshots stored beside their tests under
+  `__snapshots__/`, and
+- the provided `commented-pentagon-draft-sam-c.docx` as a manual smoke test.
+  That file is not in the repository, so it cannot back a committed fixture or
+  snapshot; its historical run is recorded as evidence only.
 
-The sample fixture is large enough that the approved output should focus on a
-small, asserted excerpt plus structural counts unless storing the full rendered
-Markdown proves useful and stable.
+The sample is large enough that the manual smoke run reports structural counts
+rather than an approved excerpt.
 
 ## Implementation milestones
 
@@ -423,15 +426,21 @@ repository quality gates.
   not exist yet.
 - [x] 2026-04-09T22:05:00+01:00: Implemented the internal document model,
   extractor, Markdown renderer, and CLI.
-- [x] 2026-04-09T22:07:00+01:00: Added `pytest-bdd` CLI scenarios and seven
-  committed `syrupy` snapshots covering synthetic fixtures and the supplied
-  sample document excerpt.
+- [x] 2026-04-09T22:07:00+01:00: Added `pytest-bdd` CLI scenarios and
+  committed `syrupy` snapshots over synthetic fixtures. There are six committed
+  snapshots; an earlier claim of seven covering a sample-document excerpt was
+  false, because the supplied `.docx` is not in the repository and no snapshot
+  references it. The synthetic fixtures must not be presented as verification
+  of real-Word sample behaviour: the sample is unavailable as an acceptance
+  fixture and is covered by the manual smoke test only.
 - [x] Implement Milestone 1.
 - [x] Implement Milestone 2.
 - [x] Implement Milestone 3.
 - [x] 2026-04-09T22:14:00+01:00: Smoke-tested the provided sample document and
   generated `/tmp/pentagon-comments.md` with 247 highlights, 247 inline
-  comments, and no warnings on standard error.
+  comments, and no warnings on standard error. This is historical evidence from
+  a run against a file that is not in the repository; it is not current,
+  reproducible verification, and no committed snapshot derives from it.
 - [x] Updated `README.md`, `docs/users-guide.md`, and
   `docs/comment-extraction-design.md` with the implemented CLI contract,
   limitations, and smoke-test findings.
@@ -446,8 +455,9 @@ repository quality gates.
   assessment. The escape oracle now asserts consumer semantics (odd-length
   backslash runs, ranges consumed as units) rather than lexical shape, and the
   oracles moved to `tests/support_renderer_oracles.py` so they can be tested
-  directly. Added `tests/unit/test_renderer_oracle_fidelity.py` (calibrated
-  against `markdown-it-py` over 35 cases) and
+  directly. Added `tests/unit/test_renderer_oracle_fidelity.py`, which
+  calibrates the oracle against `markdown-it-py` over a committed corpus of
+  live raw HTML, near-misses, and escaping residues, and
   `tests/unit/test_renderer_oracle_sensitivity.py` (mutation-tests the
   oracles). Added a highlight-span oracle, which the previous suite lacked.
 - [x] 2026-10-11: Fixed a renderer defect found while building the new oracle.
@@ -471,6 +481,16 @@ repository quality gates.
   snapshot references it, so three documents were amended to describe it as the
   manual smoke test it is. The property-suite sections of the design document
   and developers' guide were rewritten for the new oracle set.
+- [x] 2026-10-11: Recorded the reassessment the Scope tolerance required. The
+  delivered change exceeded the trigger of about 12 new source and test files
+  and about 700 net lines, so the package split was reassessed as the tolerance
+  directs. The retained split (models / extractor / renderer / cli) remains
+  appropriate: each module holds a distinct boundary. `models` carries the
+  immutable normalized structures, `extractor` owns OOXML extraction and the
+  private-interface adapter, `renderer` renders Markdown without depending on
+  Word, and `cli` holds only CLI concerns. The growth came from test coverage
+  and documentation rather than from a new architectural concern, so no
+  additional module was introduced.
 
 ## Surprises & Discoveries
 
@@ -494,8 +514,10 @@ repository quality gates.
   visible text, so the extractor must ignore zero-text runs rather than
   treating them as content fragments.
 - 2026-04-09T22:14:00+01:00: The supplied sample document rendered cleanly
-  without warnings, which confirms that the first release's paragraph and
-  heading support is enough for the initial acceptance target.
+  without warnings, which was recorded as evidence that the first release's
+  paragraph and heading support was enough for the initial acceptance target.
+  The file is not in the repository, so this remains a historical observation
+  rather than a current, reproducible check.
 - 2026-04-09T22:26:00+01:00: `cyclopts` resolves command annotations via
   `typing.get_type_hints()` when the decorated command is registered. `Path`
   therefore needed to remain a real runtime import in `cli.py`, even though
@@ -527,7 +549,10 @@ repository quality gates.
   metadata in generated fixtures.
 - 2026-04-09T22:14:00+01:00: Keep the sample smoke result in the design and
   user documentation, not only in the test suite. This gives future readers a
-  concrete reference output and acceptance baseline.
+  concrete reference output and acceptance baseline. The result is historical
+  evidence from a run against a file that is not in the repository: it is not a
+  committed snapshot, and it must not be presented as reproducible
+  synthetic-fixture verification.
 - 2026-04-09T22:26:00+01:00: Keep `Path` as a runtime import in the CLI module
   and suppress the corresponding Ruff `TC003` warning narrowly. This is a real
   `cyclopts` runtime requirement rather than dead import noise.
@@ -716,7 +741,9 @@ repository quality gates.
     inputs, including `<script&gt;` (the entity continues the tag name, so no
     reader sees an opener) and `<!x` (a declaration needs an uppercase letter).
     Each was fixed only after measuring `markdown-it-py`'s verdict directly.
-    The oracle now agrees with the parser on all 64 corpus cases.
+    The oracle now agrees with the parser on every case in the committed
+    calibration corpus (`CALIBRATION_CASES` in
+    `tests/unit/test_renderer_oracle_fidelity.py`).
 
   The working rule this establishes: when an oracle and the implementation
   disagree, measure the consumer's actual behaviour before changing either.

@@ -71,14 +71,18 @@ start and end markers rather than a general overlap graph.
   with backslashes before rendering.
 - Raw HTML and Markdown link syntax in source text or comment bodies are
   neutralized before rendering so untrusted content remains literal text.
-- Escaping also covers a fragment that *begins* with an HTML-block opener and
+- Escaping also covers text that *begins* a line with an HTML-block opener and
   never closes it, such as a bare `<!--` or `<script`. CommonMark begins an
   HTML block at the start of a line for these prefixes and runs the block to
   the next blank line, so an unclosed opener would otherwise swallow the
   renderer's own CriticMarkup markers along with every later block. The guard
-  applies only at the start of the rendered text, because the same prefixes
-  mid-line are inert and escaping them would be a visible change to text no
-  reader treats as markup.
+  matches the start condition a reader applies: the beginning of any line, not
+  merely the beginning of the rendered text, with up to three leading spaces,
+  and with the block tag names matched case-insensitively. A Word line break
+  reaches the renderer as a newline and leaves a real line start behind, so the
+  guard has to act there too. Indentation and the rest of the opener are
+  preserved, and the same prefixes mid-line stay untouched, because escaping
+  them would be a visible change to text no reader treats as markup.
 
 ## Unsupported content
 
@@ -134,7 +138,7 @@ could still highlight the wrong span. Generated document text avoids delimiter
 and ampersand characters, so the reconstruction oracle needs no escaping logic
 of its own.
 
-Escaping is checked by a further three properties: text containing every
+Escaping is checked by a further four properties: text containing every
 supported delimiter, backslashes, raw HTML, and Markdown link syntax must leave
 no delimiter, bracket, entity, or live raw HTML construct behind; inverting the
 documented transformations must recover the original text; text containing no
@@ -156,9 +160,13 @@ Two further tests keep those oracles honest:
 - `tests/unit/test_renderer_oracle_fidelity.py` calibrates the raw-HTML oracle
   against `markdown-it-py` over a corpus of live constructs, near-misses, and
   escaping residues, and asserts that real escaping output contains no token a
-  CommonMark parser recognizes. `markdown-it-py` is deliberately not a project
-  dependency; the module is present in the development environment and the test
-  skips when it is absent.
+  CommonMark parser recognizes. The corpus pins the line-start start condition
+  explicitly, including indented and uppercase openers, openers after a line
+  break, and the split-run shapes Word produces, because the oracle and the
+  renderer once shared the same blind spot and agreeing on a defect excluded
+  nothing. `markdown-it-py` is deliberately not a project dependency; the
+  module is present in the development environment and the test skips when it
+  is absent.
 - `tests/unit/test_renderer_oracle_sensitivity.py` deliberately breaks one
   renderer behaviour at a time and shows the oracle rejects the result. It
   covers per-fragment escaping, grouping that ignores comment boundaries, and a

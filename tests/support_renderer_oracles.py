@@ -59,7 +59,9 @@ _HTML_BLOCK_NAMES = (
     r"|pre|script|style|textarea"
 )
 _LIVE_LINE_START = (
-    rf"</?(?:{_HTML_BLOCK_NAMES})(?=\s|/?>|$)"
+    # A block tag name is matched case-insensitively, as the specification
+    # requires; ``<SCRIPT`` opens a block just as ``<script`` does.
+    rf"(?i:</?(?:{_HTML_BLOCK_NAMES})(?=\s|/?>|$))"
     r"|<!--"
     r"|<\?"
     # A declaration needs an uppercase letter or the literal CDATA opener; the
@@ -67,9 +69,13 @@ _LIVE_LINE_START = (
     r"|<![A-Z]"
     r"|<!\[CDATA\["
 )
+# An HTML block may be indented by up to three spaces, and it may begin at the
+# start of any line rather than only at the start of the text. Both bounds were
+# missed by an earlier form of this pattern, which accepted an indented or
+# uppercase opener as inert when a real reader sees a block.
 LIVE_RAW_HTML = re.compile(
     # A line-start opener, with or without a closing '>'.
-    rf"(?m:^(?:{_LIVE_LINE_START}))"
+    rf"(?m:^ {{0,3}}(?:{_LIVE_LINE_START}))"
     # A complete tag anywhere, which also ends any block the first rule found.
     rf"|{_LIVE_TAG}"
     rf"|<\?[\s\S]*?\?>"
@@ -78,25 +84,33 @@ LIVE_RAW_HTML = re.compile(
 LIVE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;)")
 
 # The opener prefixes CommonMark promotes to an HTML block at the start of a
-# line. The renderer neutralizes one of these when no complete tag matches at
-# the start of the text, because an unclosed opener would otherwise swallow the
-# renderer's own markers along with every later block. This restates the rule
-# rather than importing the renderer's pattern, so dropping an opener from the
-# implementation fails the accounting property instead of redefining what the
-# property counts.
-LIVE_BLOCK_OPENER = re.compile(rf"(?:{_LIVE_LINE_START})")
+# line. The renderer neutralizes one of these when no complete tag covers it,
+# because an unclosed opener would otherwise swallow the renderer's own markers
+# along with every later block. This restates the rule rather than importing the
+# renderer's pattern, so dropping an opener from the implementation fails the
+# accounting property instead of redefining what the property counts.
+#
+# Every line is a candidate, with up to three spaces of indentation, matching
+# the start condition a CommonMark reader applies.
+LIVE_BLOCK_OPENER = re.compile(rf"(?m:^ {{0,3}}(?=(?:{_LIVE_LINE_START}))<)")
 
 
 def guarded_opener_count(text: str) -> int:
     """Count the openers escaping must neutralize beyond its matched tags.
 
-    A complete tag at the start of the text is the raw-HTML pattern's job, so
-    the guard only acts when no tag matches there. Returning zero in that case
-    keeps the two mechanisms from counting the same bracket twice.
+    A complete tag anywhere is the raw-HTML pattern's job, so the guard only
+    acts where no tag covers the bracket. Masking the matched tag spans before
+    counting keeps the two mechanisms from reporting the same bracket twice, and
+    a tag that spans a line break can hide an opener behind it.
+
+    The count is per line rather than a single leading position, because a
+    fragment may carry a Word line break and every line it starts is a
+    candidate.
     """
-    if RAW_HTML_TAG.match(text) is not None:
-        return 0
-    return 1 if LIVE_BLOCK_OPENER.match(text) else 0
+    masked = list(text)
+    for match in RAW_HTML_TAG.finditer(text):
+        masked[match.start() : match.end()] = " " * (match.end() - match.start())
+    return len(LIVE_BLOCK_OPENER.findall("".join(masked)))
 
 
 # An anchored CriticMarkup reader scans left to right and consumes a complete

@@ -39,50 +39,59 @@ MARKDOWN_TEXT_ESCAPE_SEQUENCES = (
 )
 RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
 
-# ``RAW_HTML_PATTERN`` only guards a construct whose ``>`` is present. A source
-# fragment that *starts* with an HTML-block opener and never closes it is
-# neutralized instead. CommonMark begins an HTML block at the start of a line
-# for these prefixes, and the block runs to a blank line, so an unclosed
-# ``<script`` or ``<!--`` would otherwise swallow the renderer's own
-# ``{==``/``{>>`` markers along with every later block. The same prefixes
-# mid-line are inert, and escaping them anyway would be a visible change to
-# text no reader would treat as markup, so the guard is anchored to the start.
+# ``RAW_HTML_PATTERN`` only guards a construct whose ``>`` is present. A line
+# that *begins* with an HTML-block opener and never closes it is neutralized
+# instead. CommonMark begins an HTML block at such a line for these prefixes,
+# and the block runs to a blank line, so an unclosed ``<script`` or ``<!--``
+# would otherwise swallow the renderer's own ``{==``/``{>>`` markers along with
+# every later block. The same prefixes mid-line are inert, and escaping them
+# anyway would be a visible change to text no reader would treat as markup.
+#
+# Two properties of the start condition decide the shape of this pattern. It
+# applies at the start of *every* line, not merely at the start of the text, and
+# permits up to three leading spaces; a Word line break arrives as ``"\n"`` and
+# leaves a real line start behind, and Word will not have stripped the
+# indentation. The block tag names are matched case-insensitively, as the
+# specification requires, while a declaration (``<!`` plus a letter) keeps the
+# uppercase-only spelling the specification gives it.
+#
+# Only the leading bracket is consumed: the lookahead asserts which opener
+# follows, and the named group then captures the ``<`` that the substitution
+# replaces with an entity. The indentation and the rest of the opener are
+# preserved so the rendered text still reads as the source did.
 HTML_BLOCK_OPENER = re.compile(
-    r"^(?:"
+    r"(?m:^(?P<indent> {0,3})(?="
     r"<!--"
     r"|<\?"
     # A declaration needs an uppercase letter. The bracket rule may already have
     # escaped the '[' of a CDATA opener, so both CDATA forms are matched too.
     r"|<!(?:[A-Z]|\\\[|\[CDATA\[)"
-    r"|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center"
-    r"|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure"
-    r"|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend"
-    r"|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param"
-    r"|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-    r"|pre|script|style|textarea)"
+    r"|(?i:</?(?:address|article|aside|base|basefont|blockquote|body|caption"
+    r"|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption"
+    r"|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe"
+    r"|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p"
+    r"|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr"
+    r"|track|ul|pre|script|style|textarea)"
     # A tag name ends at whitespace, a tag terminator, or the end of the line.
     # ``<script&gt;`` is not an opener, because the entity continues the name.
-    r"(?=\s|/?>|$)"
-    r")"
+    r"(?=\s|/?>|$))"
+    r")(?P<bracket><))"
 )
 
 
 def _neutralize_html_block_openers(text: str) -> str:
-    """Entity-escape an HTML-block opener that nothing later closes.
+    """Entity-escape every HTML-block opener no complete tag already covers.
 
-    ``RAW_HTML_PATTERN`` handles a complete tag, so this only acts when no tag
-    matches at the start. An opener with no ``>`` slips past that pattern and,
-    at the start of a rendered block, begins an HTML block a CommonMark reader
-    extends to the next blank line. Escaping the leading bracket stops the
-    block and the rest of the line renders as ordinary text.
+    An opener with no ``>`` slips past ``RAW_HTML_PATTERN`` and, at a line
+    start, begins an HTML block a CommonMark reader extends to the next blank
+    line. Escaping the leading bracket stops the block, and the rest of the
+    line renders as ordinary text.
 
-    Guarding only the unmatched case keeps the documented accounting exact: the
+    Guarding only unmatched openers keeps the documented accounting exact: the
     characters escaping consumes are the brackets of the tags it matched, plus
     one bracket per opener guarded here.
     """
-    if RAW_HTML_PATTERN.match(text) is None and HTML_BLOCK_OPENER.match(text):
-        return "&lt;" + text[1:]
-    return text
+    return HTML_BLOCK_OPENER.sub(r"\g<indent>&lt;", text)
 
 
 def render_document(document: DocumentModel) -> str:

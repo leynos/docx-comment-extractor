@@ -137,8 +137,11 @@ Four escaping properties cover `escape_criticmarkup_text`:
 - `test_escape_preserves_text_outside_documented_transformations` inverts the
   documented escapes and asserts the original text is recovered.
 - `test_escape_leaves_inert_text_untouched` asserts that text built only from
-  characters used by no escape sequence is returned byte for byte, backslashes
-  included.
+  characters used by no escape sequence is returned unchanged. Its alphabet
+  excludes the backslash along with every delimiter character, because the
+  renderer doubles source backslashes; backslash handling is covered by the
+  neutralization property, and the round-trip property's alphabet is
+  backslash-free for the same reason.
 - `test_escape_consumes_exactly_the_raw_html_tags_it_matches` asserts that
   escaping consumes exactly the brackets it accounts for: one closing bracket
   per matched tag, and one opening bracket per matched tag plus one per
