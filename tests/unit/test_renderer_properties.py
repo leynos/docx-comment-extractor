@@ -1,4 +1,4 @@
-"""Property-based tests for comment-range reconstruction and escaping.
+r"""Property-based tests for comment-range reconstruction and escaping.
 
 The oracles here are deliberately independent of the code under test. They
 restate the contract documented in ``docs/comment-extraction-design.md`` rather
@@ -6,14 +6,20 @@ than replaying the rendering algorithm, so a defect shared between the
 implementation and a copy of it cannot hide behind the test.
 
 The suite is a bounded search, not a proof, and its domain excludes several
-cases on purpose. Source newlines are absent, because the renderer receives
-text the extractor has already normalized to one line. Comment bodies are fixed
-identifiers rather than arbitrary text. Authors and timestamps are absent. The
-extractor is not exercised here; only the renderer and its escape functions are.
-Malformed, nested, and overlapping ranges are not generated, because the
-supported range model is a sequence of disjoint ranges. Coverage of those
-exclusions lives in ``tests/unit/test_extractor.py`` and
-``tests/unit/test_cli.py`` instead.
+cases on purpose. Newlines are not absent: a Word ``w:br`` or ``w:cr`` reaches
+the renderer as ``"\n"``, so the composition alphabet includes the line feed
+and the generated text can begin a line. What that alphabet still cannot reach
+is a bare carriage return, which CommonMark also treats as a line ending; the
+extractor emits ``"\n"`` for both break elements and XML parsing normalizes a
+literal CR in character data, so the shape is out of scope rather than
+overlooked. Authors and timestamps are absent, and the composition property
+generates a fixed comment body rather than arbitrary text; the escape
+properties cover arbitrary bodies through ``escape_criticmarkup_text``, which
+is the function the renderer applies to them. The extractor is not exercised
+here; only the renderer and its escape functions are. Malformed, nested, and
+overlapping ranges are not generated, because the supported range model is a
+sequence of disjoint ranges. Coverage of those exclusions lives in
+``tests/unit/test_extractor.py`` and ``tests/unit/test_cli.py`` instead.
 """
 
 from __future__ import annotations
@@ -131,6 +137,26 @@ PINNED_UNMATCHED_OPENERS = (
     " <script\n{==x==}{>>note<<}",
 )
 
+# Whole openers for the composition strategy to draw. A uniform draw over
+# ``COMPOSITION_CHARACTERS`` reaches ``<script`` with probability about
+# 36**-9, so without these the property never actually exercises the
+# HTML-block guard it is meant to stress. The declaration and processing
+# instruction forms are included because they take a different branch of the
+# guard's pattern, and the mid-line forms pin that the guard stays off there.
+OPENER_SAMPLES = (
+    "<script",
+    "<SCRIPT",
+    "<Script",
+    "</div",
+    "<DIV",
+    "<h2",
+    "<!--",
+    "<?php",
+    "<!DOCTYPE",
+    "<![CDATA[",
+    "a <script",
+)
+
 # Composition text is drawn from the reactive characters themselves, so that
 # adjacent fragments can reassemble a construct neither fragment contains. The
 # line-feed is included because a Word line break reaches the renderer as
@@ -238,8 +264,16 @@ def composition_text() -> st.SearchStrategy[str]:
     the generator produces the boundary shapes that matter: ``"<scr"`` beside
     ``"ipt>"``, ``"{"`` beside ``"=="``, and backslash runs split from the
     bracket they precede.
+
+    Draws are mixed with whole openers and tag names. Uniform draws reach a nine
+    character opener like ``<script`` only by luck, and the HTML-block shapes
+    the guard exists for are longer than the fragment budget, so the structured
+    samples keep the property pointed at them.
     """
-    return st.text(alphabet=COMPOSITION_CHARACTERS, max_size=4)
+    return st.one_of(
+        st.text(alphabet=COMPOSITION_CHARACTERS, max_size=4),
+        st.sampled_from(OPENER_SAMPLES),
+    )
 
 
 def _comment_id(index: int) -> str:
@@ -314,10 +348,45 @@ def _empty_block(level: int | None) -> Block:
     )
 
 
+def _draw_comment_bodies(
+    draw: DrawFn,
+    bodies: st.SearchStrategy[str] | None,
+    count: int,
+) -> list[str]:
+    """Draw one body per comment, defaulting to the fixed ``@aN@`` identifier."""
+    if bodies is None:
+        return [_comment_body(index) for index in range(count)]
+    return draw(st.lists(bodies, min_size=count, max_size=count))
+
+
+def _draw_cuts(draw: DrawFn, owner_count: int) -> list[int]:
+    """Draw the sorted positions where the fragment stream is cut into blocks."""
+    return sorted(
+        draw(
+            st.sets(
+                st.integers(min_value=1, max_value=owner_count - 1),
+                max_size=MAX_BLOCK_CUTS,
+            )
+        )
+    )
+
+
+def _draw_heading_levels(draw: DrawFn, bounds: list[int]) -> list[int | None]:
+    """Draw one heading level or paragraph for each block the cuts produce."""
+    return draw(
+        st.lists(
+            st.one_of(st.none(), st.integers(min_value=1, max_value=6)),
+            min_size=len(bounds) - 1,
+            max_size=len(bounds) - 1,
+        )
+    )
+
+
 @st.composite
 def document_models(
     draw: DrawFn,
     text: st.SearchStrategy[str] | None = None,
+    bodies: st.SearchStrategy[str] | None = None,
 ) -> DocumentModel:
     """Generate a bounded model whose comment ranges are balanced.
 
@@ -328,36 +397,34 @@ def document_models(
     ``text`` overrides the fragment alphabet. The default is inert text, which
     the reconstruction oracle can compare without inverting escapes; the
     composition property substitutes reactive text and uses its own oracles.
+
+    ``bodies`` overrides the comment body alphabet. The default body is a fixed
+    identifier that cannot appear in generated text, which the reconstruction
+    oracle needs: it strips the rendered reference to recover the source. The
+    composition property substitutes reactive bodies, because the renderer
+    escapes the reference through the same function it applies to text and a
+    construct assembled there counts the same as one assembled in a fragment.
     """
     text_strategy = document_text() if text is None else text
     count = draw(st.integers(min_value=0, max_value=MAX_COMMENT_RANGES))
-    spans = draw(
-        st.lists(st.integers(1, MAX_RANGE_SPAN), min_size=count, max_size=count)
-    )
-    gaps = draw(
-        st.lists(
-            st.integers(0, MAX_GAP_FRAGMENTS), min_size=count + 1, max_size=count + 1
-        )
-    )
-    owners = _lay_out_ownership(spans, gaps)
-    cuts = sorted(
+    comment_bodies = _draw_comment_bodies(draw, bodies, count)
+    owners = _lay_out_ownership(
+        draw(st.lists(st.integers(1, MAX_RANGE_SPAN), min_size=count, max_size=count)),
         draw(
-            st.sets(
-                st.integers(min_value=1, max_value=len(owners) - 1),
-                max_size=MAX_BLOCK_CUTS,
+            st.lists(
+                st.integers(0, MAX_GAP_FRAGMENTS),
+                min_size=count + 1,
+                max_size=count + 1,
             )
-        )
+        ),
     )
-    bounds = [0, *cuts, len(owners)]
-    texts = draw(st.lists(text_strategy, min_size=len(owners), max_size=len(owners)))
-    levels = draw(
-        st.lists(
-            st.one_of(st.none(), st.integers(min_value=1, max_value=6)),
-            min_size=len(bounds) - 1,
-            max_size=len(bounds) - 1,
-        )
+    bounds = [0, *_draw_cuts(draw, len(owners)), len(owners)]
+    blocks = _build_blocks(
+        owners,
+        bounds,
+        draw(st.lists(text_strategy, min_size=len(owners), max_size=len(owners))),
+        _draw_heading_levels(draw, bounds),
     )
-    blocks = _build_blocks(owners, bounds, texts, levels)
     if draw(st.booleans()):
         blocks.insert(
             draw(st.integers(min_value=0, max_value=len(blocks))),
@@ -369,7 +436,7 @@ def document_models(
             Comment(
                 comment_id=_comment_id(index),
                 author=None,
-                body=_comment_body(index),
+                body=comment_bodies[index],
             )
             for index in range(count)
         ),
@@ -567,9 +634,17 @@ def test_render_preserves_source_text_and_range_structure(
     assert_highlights_match_source_ranges(document, rendered)
 
 
-@given(document=document_models(text=composition_text()))
+@given(
+    document=document_models(text=composition_text(), bodies=composition_text()),
+)
 def test_render_is_safe_across_fragment_boundaries(document: DocumentModel) -> None:
-    """A construct split across fragments should not survive as live markup."""
+    """A construct split across fragments should not survive as live markup.
+
+    Comment bodies are drawn from the same alphabet as the text. The renderer
+    runs the reference through the same escaping function, so an opener or an
+    ampersand in a body is as live as one in a fragment, and a body is the one
+    place generated content reaches the range interior.
+    """
     rendered = render_document(document)
 
     assert_composition_safety(document, rendered)
@@ -580,11 +655,15 @@ def test_render_is_safe_across_fragment_boundaries(document: DocumentModel) -> N
 def test_escape_preserves_text_outside_documented_transformations(text: str) -> None:
     r"""Inverting the documented escapes should return the original text.
 
-    The alphabet holds no backslash. Doubling a source backslash and then
-    escaping a bracket produces ``\[`` for both ``[`` and ``\[``, so no
-    inverse function can be unique over text that already contains an escape
-    sequence. The backslash rule is verified by the safety property instead,
-    which asks whether the result is inert rather than whether it inverts.
+    The alphabet holds no backslash, and the restriction belongs to the
+    implementation of the inverse rather than to a collision in the encoder.
+    Escaping is injective: a source ``[`` renders as ``\[`` and a source ``\[``
+    as ``\\\[``, which are different outputs. ``strip_documented_escapes``
+    undoes the bracket rule by replacing ``\[`` with ``[``, so on a source that
+    already contains an escape sequence it stops one backslash short rather
+    than ambiguously. The backslash rule is verified by the safety property
+    instead, which asks whether the result is inert rather than whether it
+    inverts.
     """
     assert strip_documented_escapes(escape_criticmarkup_text(text)) == text, (
         "escaping should change nothing beyond the documented transformations"
@@ -643,6 +722,13 @@ def test_escape_consumes_exactly_the_raw_html_tags_it_matches(text: str) -> None
     bracket per opener guarded. ``guarded_opener_count`` restates that rule
     independently, so dropping an opener from the implementation fails here
     rather than redefining the expectation.
+
+    What this establishes is bounded: intact-tag removal and the aggregate
+    bracket counts. It does not pin which bracket became which entity, so it
+    would not notice a transformation that escaped the right number of brackets
+    in the wrong places. The per-construct check that carries consumer safety is
+    ``test_escape_neutralizes_every_live_construct``; this property is the
+    accounting cross-check that catches a guard silently dropping an opener.
     """
     escaped = escape_criticmarkup_text(text)
     matched = RAW_HTML_TAG.findall(text)

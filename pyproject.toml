@@ -28,6 +28,10 @@ dev = [
     "syrupy",
     "lxml-stubs>=0.5.1",
     "hypothesis>=6.140.0,<7.0",
+    # Calibration oracle for the raw-HTML predicates. Declared as a development
+    # dependency so the fidelity tests cannot silently skip in CI; the package
+    # itself does not use it at runtime.
+    "markdown-it-py>=4.0,<5.0",
 ]
 
 [tool.ruff]

@@ -6,26 +6,19 @@ a pattern that is too loose rejects safe output, and one that is too narrow
 accepts output a reader would parse as markup. This test pins the oracle to
 ``markdown-it-py`` rather than to my reading of the specification.
 
-``markdown-it-py`` is deliberately not declared as a project dependency. It is
-present in the development environment, and the suite skips this calibration
-when it is absent, so the production dependency set never grows for a test-only
-need.
+``markdown-it-py`` is declared in the development dependency group, not the
+production one, so the runtime dependency set does not grow for a test-only
+need. It is imported unconditionally: the calibration is required evidence for
+the boundary oracle, and a skip would let it disappear from a passing run
+without any signal.
 """
 
 from __future__ import annotations
 
-import typing as typ
-
 import pytest
+from markdown_it import MarkdownIt
 
 from tests.support_renderer_oracles import LIVE_RAW_HTML
-
-markdown_it = pytest.importorskip(
-    "markdown_it", reason="calibration parser not installed"
-)
-
-if typ.TYPE_CHECKING:
-    from markdown_it import MarkdownIt
 
 # Each case pairs a snippet with the classification a CommonMark reader gives
 # it. The corpus covers every raw-HTML shape the specification recognizes, the
@@ -126,8 +119,6 @@ def _live_html_tokens(markdown: MarkdownIt, text: str) -> list[str]:
 @pytest.mark.parametrize(("text", "is_live"), CALIBRATION_CASES)
 def test_oracle_agrees_with_commonmark(text: str, *, is_live: bool) -> None:
     """The oracle's verdict should match a real CommonMark parser's."""
-    from markdown_it import MarkdownIt
-
     markdown = MarkdownIt("commonmark")
     parser_verdict = bool(_live_html_tokens(markdown, text))
     oracle_verdict = bool(LIVE_RAW_HTML.search(text))
@@ -143,8 +134,6 @@ def test_oracle_rejects_every_escaping_residue() -> None:
     output rather than hand-written snippets, so it also covers whatever the
     escape table does to a tag that straddles the raw-HTML pattern.
     """
-    from markdown_it import MarkdownIt
-
     from docx_comment_extractor.renderer import escape_criticmarkup_text
 
     markdown = MarkdownIt("commonmark")
@@ -202,8 +191,6 @@ def test_escaping_neutralizes_indented_and_case_insensitive_openers(
     neutralize any of those shapes leaves a live ``html_block`` that runs to the
     next blank line, which is where the renderer's own CriticMarkup markers sit.
     """
-    from markdown_it import MarkdownIt
-
     from docx_comment_extractor.renderer import escape_criticmarkup_text
 
     markdown = MarkdownIt("commonmark")
@@ -230,8 +217,6 @@ def test_escaping_neutralizes_openers_reassembled_across_runs(
     fragments: tuple[str, ...],
 ) -> None:
     """An opener split across Word runs should be neutralized once rejoined."""
-    from markdown_it import MarkdownIt
-
     from docx_comment_extractor.renderer import escape_criticmarkup_text
 
     markdown = MarkdownIt("commonmark")

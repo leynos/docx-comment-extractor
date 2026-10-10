@@ -59,6 +59,7 @@ dependencies = [
 dev = [
     { name = "hypothesis" },
     { name = "lxml-stubs" },
+    { name = "markdown-it-py" },
     { name = "packaging" },
     { name = "pyright" },
     { name = "pytest" },
@@ -83,6 +84,7 @@ requires-dist = [
 dev = [
     { name = "hypothesis", specifier = ">=6.140.0,<7.0" },
     { name = "lxml-stubs", specifier = ">=0.5.1" },
+    { name = "markdown-it-py", specifier = ">=4.0,<5.0" },
     { name = "packaging", specifier = ">=26.3,<27.0" },
     { name = "pyright" },
     { name = "pytest" },

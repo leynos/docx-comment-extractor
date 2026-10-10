@@ -164,31 +164,52 @@ Two further modules check the oracles rather than the renderer.
 
 `tests/unit/test_renderer_oracle_fidelity.py` calibrates the raw-HTML oracle
 against `markdown-it-py` over a corpus of live constructs, near-misses such as
-`<a~>` and `<script&gt;`, and the residues real escaping leaves behind. It also
-runs the real escape function over a sample set and asserts the output contains
-no token a CommonMark parser recognizes. `markdown-it-py` is deliberately not
-declared as a project dependency; it is present in the development environment
-and the module skips when it is absent.
+`<a~>` and `<script&gt;`, and the residues real escaping leaves behind. The
+corpus is curated rather than exhaustive: it pins the shapes the specification
+recognizes and the near-misses around them, not every HTML form a parser
+accepts. The module also runs the real escape function over a sample set and
+asserts the output contains no token a CommonMark parser recognizes.
+`markdown-it-py` is declared in the development dependency group, not the
+production one, and it is imported unconditionally so the calibration cannot
+silently skip out of a passing run.
 
 `tests/unit/test_renderer_oracle_sensitivity.py` mutates the renderer with
 `monkeypatch`, one behaviour at a time, and shows the oracle rejects the
 result. It covers per-fragment escaping, grouping that ignores comment
-boundaries, and a removed backslash-doubling rule, with a control case
-confirming the unmutated renderer is accepted.
+boundaries, a removed backslash-doubling rule, the pre-repair HTML-block guard
+that missed indented and case-insensitive openers, live markup in a comment
+reference, and a highlight displaced onto the wrong span. Control cases confirm
+the unmutated renderer is accepted and that the reference and extent oracles
+accept correct output, so a rejection cannot be explained by an oracle that
+rejects everything.
 
 Limits of the coverage. The round-trip oracle uses an alphabet without
-backslashes, because an input that already contains an escape sequence cannot
-be recovered unambiguously by inverting the documented transformations; text
-that already carries escapes is covered by the neutralization and inert-text
-properties instead. Idempotence is deliberately not asserted, because escaping
-an already escaped string can add backslashes. The reconstruction generator
-does not model nested or overlapping ranges, which the extractor does not
-produce. Consequently the order in which the renderer emits several comment
-ends attached to a single fragment is not observable under the supported
-semantics: ranges would have to share their final fragment, and sharing a slot
-is overlap. The composition property's domain excludes malformed and
-overlapping ranges as well; those are covered by the extractor and CLI tests
-instead.
+backslashes, because `strip_documented_escapes` inverts the bracket rule by
+replacing `\[` with `[`, so on input that already contains an escape sequence
+it stops one backslash short; the restriction is a property of that inverse,
+not of the encoder, which renders `[` and `\[` differently. Text that already
+carries escapes is covered by the neutralization and inert-text properties
+instead. Idempotence is deliberately not asserted, because escaping an already
+escaped string can add backslashes. The reconstruction generator does not model
+nested or overlapping ranges, which the extractor does not produce.
+Consequently the order in which the renderer emits several comment ends
+attached to a single fragment is not observable under the supported semantics:
+ranges would have to share their final fragment, and sharing a slot is overlap.
+The composition property's domain excludes malformed and overlapping ranges as
+well; those are covered by the extractor and CLI tests instead.
+
+The bounds are explicit: disjoint ranges, at most three comments, three
+fragments per range, two gap fragments per gap, and three block cuts. The
+composition property checks safety under a committed CriticMarkup reader model
+— an anchored left-to-right consumer that takes each `{==…==}{>>…<<}` pair as
+one span, with CriticMarkup processing before Markdown parsing — rather than
+under a verified downstream pipeline; no CriticMarkup renderer is in the
+dependency set. A bare carriage return is also out of scope, because the
+extractor emits `"\n"` for both break elements and XML parsing normalizes a
+literal CR in character data. The accounting property
+(`test_escape_consumes_exactly_the_raw_html_tags_it_matches`) establishes
+intact-tag removal and aggregate bracket counts, not exact transformed
+positions; the per-construct check carries consumer safety.
 
 Each delimiter, a bare ampersand, a source-backslash link, and a raw HTML span
 containing a delimiter are pinned with `@example` in addition to being

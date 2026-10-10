@@ -155,6 +155,18 @@ markup. An earlier form of this check accepted any immediately preceding
 backslash and therefore passed a live Markdown link assembled from a source
 backslash.
 
+The CriticMarkup consumer is modelled explicitly rather than assumed. The
+supported consumer reads the document left to right and consumes each complete
+`{==…==}{>>…<<}` pair as one span, and CriticMarkup processing is taken to run
+before Markdown parsing, which is why a highlight interior may hold delimiter
+text but must still contain no live raw HTML or active bracket. The model is a
+committed reader, `consumed_spans` plus `composition_violation`, and it is
+calibrated against the same independent CommonMark parser only where Markdown
+classification is at stake; the CriticMarkup half is a stated model rather than
+a verified downstream integration, because no CriticMarkup renderer is in the
+dependency set. The composition property therefore claims safety under that
+model, not under every consumer an operator might choose.
+
 Two further tests keep those oracles honest:
 
 - `tests/unit/test_renderer_oracle_fidelity.py` calibrates the raw-HTML oracle
@@ -164,14 +176,20 @@ Two further tests keep those oracles honest:
   explicitly, including indented and uppercase openers, openers after a line
   break, and the split-run shapes Word produces, because the oracle and the
   renderer once shared the same blind spot and agreeing on a defect excluded
-  nothing. `markdown-it-py` is deliberately not a project dependency; the
-  module is present in the development environment and the test skips when it
-  is absent.
+  nothing. The corpus covers the shapes the specification recognizes, the
+  near-misses around them, and the residues real escaping leaves behind; it is
+  a curated corpus rather than an exhaustive catalogue of CommonMark HTML.
+  `markdown-it-py` is declared in the development dependency group, not the
+  production one, and the calibration is imported unconditionally so it cannot
+  silently skip.
 - `tests/unit/test_renderer_oracle_sensitivity.py` deliberately breaks one
   renderer behaviour at a time and shows the oracle rejects the result. It
-  covers per-fragment escaping, grouping that ignores comment boundaries, and a
-  removed backslash-doubling rule, alongside a control showing the unmutated
-  renderer is accepted.
+  covers per-fragment escaping, grouping that ignores comment boundaries, a
+  removed backslash-doubling rule, the pre-repair HTML-block guard that missed
+  indented and case-insensitive openers, live markup in a comment reference,
+  and a highlight displaced onto the wrong span, alongside controls showing the
+  unmutated renderer is accepted and that the reference and extent oracles
+  accept correct output.
 
 The coverage has limits worth recording. The round-trip property uses an
 alphabet without backslashes, because an input already containing an escape

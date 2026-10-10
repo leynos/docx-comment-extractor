@@ -721,8 +721,16 @@ repository quality gates.
   Detection was also flaky run to run, because whether a property caught a
   given mutation depended on the random draw. Each delimiter, a bare ampersand,
   and the order-sensitive `<a~>` shape are now pinned with `@example`, so the
-  suite is sensitive to nineteen of the twenty mutations on every run. The
+  suite became sensitive to nineteen of the twenty mutations on every run. The
   twentieth is the unreachable one above.
+
+  This campaign was a development activity, not committed evidence: it ran
+  against the working tree in a scratch harness that is not in the repository,
+  and no mutation inventory or reproduction command is committed. Its findings
+  are recorded here as **historical development evidence**. The reproducible
+  sensitivity evidence is `tests/unit/test_renderer_oracle_sensitivity.py` and
+  `tests/unit/test_renderer_properties.py`, which commit four mutation controls
+  and their negative controls rather than reporting a rate.
 
   No production defect was found, so `renderer.py` is unchanged by this work.
 
@@ -837,11 +845,12 @@ that first claimed to catch it. A mutation caught for the wrong reason is not
 evidence, so each assertion was traced back to the defect it actually observes.
 
 Building the consumer-faithful oracle also found a real renderer defect that
-four earlier rounds of review and a twenty-mutation audit had missed: an
-unclosed HTML-block opener at the start of a block swallowed the renderer's own
-CriticMarkup markers, because CommonMark runs such a block to the next blank
-line. That is a direct consequence of the proof assessment's request to model
-what a consumer actually does rather than what the code appears to do.
+four earlier rounds of review and the twenty-mutation development campaign had
+missed: an unclosed HTML-block opener at the start of a block swallowed the
+renderer's own CriticMarkup markers, because CommonMark runs such a block to
+the next blank line. That is a direct consequence of the proof assessment's
+request to model what a consumer actually does rather than what the code
+appears to do.
 
 Two documentation defects were corrected at the same time, both of which had
 survived several reviews. Three documents claimed a `syrupy` snapshot of the
@@ -849,3 +858,49 @@ supplied sample document, but that file is not in the repository and no
 snapshot references it; they now describe the manual smoke test it really is.
 The property-suite sections of the design document and developers' guide
 described the superseded oracle and are rewritten for the current suite.
+
+- 2026-10-11: The proof assessment's second round was answered. Five items.
+
+  The generator premise was wrong. The module docstring claimed source newlines
+  are absent because the extractor normalizes to one line; the extractor maps
+  both `w:br` and `w:cr` to `"\n"`, so newlines are reachable and already in
+  the composition alphabet. The docstring now records the reachable domain and
+  the one remaining exclusion (a bare carriage return), and the composition
+  strategy draws whole openers in addition to uniform characters, because a
+  nine-character opener was otherwise only reachable by luck.
+
+  The comment reference was unexamined. `consumed_spans` reported only the
+  highlight interior, so a body was discarded before any check saw it; the
+  renderer escapes the reference through the same function as document text, so
+  that was a real coverage hole. The oracle now reports references separately
+  through `consumed_references` and checks them, and the composition property
+  draws reactive bodies. Both were shown sensitive: the previous interior-only
+  oracle returned clean for a body containing `{==`, `[`, and a line-start
+  `<script`, all of which the current oracle reports.
+
+  The CriticMarkup consumer is now an explicit, documented model — an anchored
+  left-to-right reader taking each pair as one span, with CriticMarkup before
+  Markdown parsing — and the design document states that this is a model rather
+  than a verified downstream integration, because no CriticMarkup renderer is
+  in the dependency set.
+
+  Two sensitivity gaps were closed. The mutated control for the pre-repair
+  HTML-block guard is now committed, so the oracle's sensitivity to indented
+  and case-insensitive openers is reproduced by the suite rather than reported,
+  and a negative control for a highlight displaced onto the wrong span was
+  added. In each case a paired healthy-renderer control shows the oracle is not
+  rejecting everything.
+
+  Calibration was made a requirement. `markdown-it-py` is declared in the
+  development dependency group and the fidelity module imports it
+  unconditionally, so the calibration can no longer skip out of a passing run.
+  It remains absent from the production dependency set.
+
+  Two documentation claims were corrected in the same round: the inverse
+  oracle's docstring said `[` and `\[` produce the same escaped output, which
+  is false — the encoder is injective and the restriction belongs to the
+  implemented inverse — and the accounting property now states its own bound
+  (intact-tag removal and aggregate counts, not exact positions). The
+  twenty-mutation campaign is relabelled historical development evidence, since
+  no inventory or harness for it is committed; the reproducible sensitivity
+  evidence is the committed mutation controls.

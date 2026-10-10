@@ -176,6 +176,11 @@ def consumed_spans(rendered: str) -> list[tuple[str, str]]:
     are the renderer's own markup, and a later marker's ``>`` would otherwise
     complete an inert ``<!`` in the prose into a tag that exists only because
     the check searched across markup.
+
+    The interior is the highlighted text alone; the reference is not part of it.
+    The reference is reported separately by ``consumed_references``, so a count
+    of ranges is not confused by a body, and a body is still checked rather than
+    discarded.
     """
     spans: list[tuple[str, str]] = []
     cursor = 0
@@ -189,6 +194,45 @@ def consumed_spans(rendered: str) -> list[tuple[str, str]]:
     return spans
 
 
+def consumed_references(rendered: str) -> list[str]:
+    """Return the comment reference text of every consumed range.
+
+    A body reaches the output inside ``{>> ... <<}`` and is escaped by the same
+    function the renderer applies to document text, so it can carry a live
+    construct just as a fragment can. Checking only the highlight interior left
+    the body unexamined; this is what makes it visible to the oracle.
+    """
+    return [match.group("reference") for match in ANCHORED_RANGE.finditer(rendered)]
+
+
+def first_live_construct(
+    chunk: str,
+    *,
+    kind: str,
+    check_delimiters: bool,
+) -> str | None:
+    """Return the first live construct in one chunk, or ``None`` if it is clean.
+
+    ``kind`` names the chunk in the verdict, so a failure says whether the
+    construct was in the prose, a highlight interior, or a comment reference.
+    ``check_delimiters`` carries the one standard that differs between them: a
+    range interior may hold delimiter text, because that is its content, while
+    prose and a reference may not. Raw HTML and Markdown brackets are unsafe in
+    all three.
+    """
+    match = LIVE_RAW_HTML.search(chunk)
+    if match is not None:
+        return f"live raw HTML tag in {kind}: {match.group()!r}"
+    if has_active_bracket(chunk):
+        return f"active Markdown bracket in {kind}: {chunk!r}"
+    if not check_delimiters:
+        return None
+    for delimiter in RANGE_MARKERS:
+        if active_delimiter_count(chunk, delimiter):
+            return f"live {delimiter!r} in {kind}: {chunk!r}"
+    return None
+
+
 def composition_violation(rendered: str) -> str | None:
     """Return the first live construct in ``rendered``, or ``None`` if clean.
 
@@ -196,18 +240,25 @@ def composition_violation(rendered: str) -> str | None:
     itself can be tested. Prose must carry no live markup at all. A consumed
     range may hold delimiter text, because that is its content, but its raw HTML
     and Markdown brackets must still be inert or the highlight would not nest.
+
+    A comment reference is held to the prose standard rather than the range
+    standard. Delimiters in the interior are the highlighted document's own
+    text, which a CriticMarkup reader keeps as content, but a delimiter in the
+    reference would close the range early and spill the rest of the body into
+    the document.
     """
     for kind, chunk in consumed_spans(rendered):
-        match = LIVE_RAW_HTML.search(chunk)
-        if match is not None:
-            return f"live raw HTML tag in {kind}: {match.group()!r}"
-        if has_active_bracket(chunk):
-            return f"active Markdown bracket in {kind}: {chunk!r}"
-        if kind != "prose":
-            continue
-        for delimiter in RANGE_MARKERS:
-            if active_delimiter_count(chunk, delimiter):
-                return f"live {delimiter!r} in {kind}: {chunk!r}"
+        violation = first_live_construct(
+            chunk, kind=kind, check_delimiters=kind == "prose"
+        )
+        if violation is not None:
+            return violation
+    for reference in consumed_references(rendered):
+        violation = first_live_construct(
+            reference, kind="reference", check_delimiters=True
+        )
+        if violation is not None:
+            return violation
     return None
 
 
@@ -252,4 +303,40 @@ def apply_missing_backslash_rule(monkeypatch: pytest.MonkeyPatch) -> None:
         tuple(
             pair for pair in renderer.MARKDOWN_TEXT_ESCAPE_SEQUENCES if pair[0] != "\\"
         ),
+    )
+
+
+# The guard as it stood before the start-condition repair: anchored at string
+# position zero and case-sensitive, so an indented, uppercase, or
+# post-line-break opener slipped past it. Reproduced here so the oracle's
+# sensitivity to that defect is committed rather than reported.
+def leading_only_html_block_opener(text: str) -> str:
+    """Entity-escape an opener only when it starts the whole string."""
+    if RAW_HTML_TAG.match(text) is None and _LEADING_ONLY_OPENER.match(text):
+        return "&lt;" + text[1:]
+    return text
+
+
+_LEADING_ONLY_OPENER = re.compile(
+    r"^(?:"
+    r"<!--"
+    r"|<\?"
+    r"|<!(?:[A-Z]|\\\[|\[CDATA\[)"
+    r"|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center"
+    r"|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure"
+    r"|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend"
+    r"|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param"
+    r"|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+    r"|pre|script|style|textarea)"
+    r"(?=\s|/?>|$)"
+    r")"
+)
+
+
+def apply_leading_only_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the pre-repair guard, which only guarded string position zero."""
+    from docx_comment_extractor import renderer
+
+    monkeypatch.setattr(
+        renderer, "_neutralize_html_block_openers", leading_only_html_block_opener
     )

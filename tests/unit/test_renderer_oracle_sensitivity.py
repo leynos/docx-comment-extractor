@@ -12,20 +12,20 @@ module or the oracle's own dependencies, so they cannot leak between tests.
 
 from __future__ import annotations
 
-import typing as typ
+import pytest
 
 from docx_comment_extractor.models import Block, Comment, DocumentModel, Fragment
 from docx_comment_extractor.renderer import render_document
 from tests.support_renderer_oracles import (
     apply_boundary_insensitive_escaping,
+    apply_leading_only_html_block_guard,
     apply_missing_backslash_rule,
     apply_per_fragment_escaping,
     composition_violation,
+    consumed_references,
     consumed_spans,
 )
-
-if typ.TYPE_CHECKING:
-    import pytest
+from tests.unit.test_renderer_properties import assert_highlights_match_source_ranges
 
 # A tag and a delimiter deliberately split across run boundaries, the shapes
 # Word produces when formatting changes mid-token.
@@ -39,6 +39,7 @@ def _document(
     *,
     comments: int = 0,
     range_length: int | None = None,
+    bodies: tuple[str, ...] = (),
 ) -> DocumentModel:
     """Build a one-block document over the given fragment texts.
 
@@ -46,6 +47,9 @@ def _document(
     fragment, which is the shape that leaves uncommented prose outside the
     range; a shorter range is what puts a boundary in the middle of a construct
     the fragments reassemble.
+
+    ``bodies`` overrides the default ``@aN@`` body, so a probe can put reactive
+    text where the renderer escapes the comment reference.
     """
     last = len(texts) - 1 if range_length is None else range_length - 1
     fragments = tuple(
@@ -59,7 +63,11 @@ def _document(
     return DocumentModel(
         blocks=(Block(kind="paragraph", fragments=fragments),),
         comments=tuple(
-            Comment(comment_id=f"c{index}", author=None, body=f"@a{index}@")
+            Comment(
+                comment_id=f"c{index}",
+                author=None,
+                body=bodies[index] if index < len(bodies) else f"@a{index}@",
+            )
             for index in range(comments)
         ),
     )
@@ -173,3 +181,78 @@ def test_consumer_split_ignores_delimiters_inside_a_range() -> None:
     spans = consumed_spans(rendered)
     assert [kind for kind, _chunk in spans] == ["range"]
     assert composition_violation(rendered) is None
+
+
+def test_oracle_detects_indented_and_case_insensitive_openers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pre-repair guard's misses should be rejected, not accepted.
+
+    The old guard acted only at string position zero and matched block tag
+    names case-sensitively. CommonMark does neither: a block starts at any line
+    start, allows up to three leading spaces, and matches the names
+    case-insensitively, so every shape below opened a block that swallowed the
+    renderer's own markers. The oracle and the renderer once shared this blind
+    spot, which is why the property passed while excluding nothing; this
+    control keeps the two from drifting back into agreement on the defect.
+    """
+    apply_leading_only_html_block_guard(monkeypatch)
+
+    for text in (" <script", "<SCRIPT", "safe\n<script", "safe\n<!--"):
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is not None, (
+            f"a missed HTML-block opener was not detected in {rendered!r}"
+        )
+
+
+def test_reference_check_detects_live_markup_in_a_comment_body() -> None:
+    """A live construct in a comment reference should be caught, not skipped.
+
+    The reference is escaped by the same function as document text, so a body
+    can carry a reassembled opener just as a fragment can. An earlier form of
+    ``consumed_spans`` reported only the highlight interior, so a body was
+    discarded before any check saw it and the composition property could not
+    have caught a defect there.
+    """
+    for body in ("a {== b", "see [link", "safe\n<script"):
+        rendered = f"{{==x==}}{{>>{body}<<}}"
+        assert consumed_references(rendered) == [body], (
+            "the oracle should report the reference it withholds from the interior"
+        )
+        violation = composition_violation(rendered)
+        assert violation is not None, (
+            f"live markup in a comment body was not detected: {rendered!r}"
+        )
+
+
+def test_healthy_renderer_escapes_reactive_comment_bodies() -> None:
+    """The control for the reference check: real escaping leaves it clean.
+
+    Without this, the check above could pass because the oracle rejects every
+    body rather than because a defect is present.
+    """
+    for body in ("a {== b", "see [link", "safe\n<script"):
+        rendered = render_document(_document(("hi",), bodies=(body,)))
+        assert composition_violation(rendered) is None, (
+            f"the current renderer produced unsafe output: {rendered!r}"
+        )
+
+
+def test_oracle_detects_displaced_highlight_extents() -> None:
+    """A highlight over the wrong span should be caught, not accepted.
+
+    Preserving the text and balancing markers is not enough: for a commented
+    ``A`` followed by unowned ``B``, both ``{==A==}{>>@a0@<<}B`` and
+    ``A{==B==}{>>@a0@<<}`` preserve ``AB`` and close one range. Only the first
+    highlights the model's span, so the extent oracle is what separates them.
+    This pins that the oracle is sensitive to the displacement rather than
+    merely to a missing marker.
+    """
+    document = _document(("A", "B"), comments=1, range_length=1)
+
+    correct = "{==A==}{>>@a0@<<}B"
+    displaced = "A{==B==}{>>@a0@<<}"
+    assert_highlights_match_source_ranges(document, correct)
+
+    with pytest.raises(AssertionError, match="should highlight its own source span"):
+        assert_highlights_match_source_ranges(document, displaced)
