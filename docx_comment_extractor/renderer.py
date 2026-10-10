@@ -7,7 +7,7 @@ import re
 import typing as typ
 
 if typ.TYPE_CHECKING:
-    from .models import Block, Comment, DocumentModel
+    from .models import Block, Comment, DocumentModel, Fragment
 
 CRITICMARKUP_ESCAPE_SEQUENCES = (
     ("{++", r"\{++"),
@@ -24,12 +24,65 @@ CRITICMARKUP_ESCAPE_SEQUENCES = (
     ("<<}", r"<<\}"),
 )
 
+# The backslash is doubled before any other rule runs. Every rule below
+# neutralizes its character by adding a single backslash in front of it, and a
+# Markdown consumer reads a construct as escaped only when the run of
+# backslashes before it is odd. Doubling first keeps that parity true: source
+# backslashes arrive in even runs, so the added escape always makes the run
+# odd. Without it, a source backslash would cancel the added escape and turn
+# ``\[`` back into an active bracket.
 MARKDOWN_TEXT_ESCAPE_SEQUENCES = (
+    ("\\", "\\\\"),
     ("&", "&amp;"),
     ("[", r"\["),
     ("]", r"\]"),
 )
 RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
+
+# ``RAW_HTML_PATTERN`` only guards a construct whose ``>`` is present. A source
+# fragment that *starts* with an HTML-block opener and never closes it is
+# neutralized instead. CommonMark begins an HTML block at the start of a line
+# for these prefixes, and the block runs to a blank line, so an unclosed
+# ``<script`` or ``<!--`` would otherwise swallow the renderer's own
+# ``{==``/``{>>`` markers along with every later block. The same prefixes
+# mid-line are inert, and escaping them anyway would be a visible change to
+# text no reader would treat as markup, so the guard is anchored to the start.
+HTML_BLOCK_OPENER = re.compile(
+    r"^(?:"
+    r"<!--"
+    r"|<\?"
+    # A declaration needs an uppercase letter. The bracket rule may already have
+    # escaped the '[' of a CDATA opener, so both CDATA forms are matched too.
+    r"|<!(?:[A-Z]|\\\[|\[CDATA\[)"
+    r"|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center"
+    r"|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure"
+    r"|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend"
+    r"|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param"
+    r"|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+    r"|pre|script|style|textarea)"
+    # A tag name ends at whitespace, a tag terminator, or the end of the line.
+    # ``<script&gt;`` is not an opener, because the entity continues the name.
+    r"(?=\s|/?>|$)"
+    r")"
+)
+
+
+def _neutralize_html_block_openers(text: str) -> str:
+    """Entity-escape an HTML-block opener that nothing later closes.
+
+    ``RAW_HTML_PATTERN`` handles a complete tag, so this only acts when no tag
+    matches at the start. An opener with no ``>`` slips past that pattern and,
+    at the start of a rendered block, begins an HTML block a CommonMark reader
+    extends to the next blank line. Escaping the leading bracket stops the
+    block and the rest of the line renders as ordinary text.
+
+    Guarding only the unmatched case keeps the documented accounting exact: the
+    characters escaping consumes are the brackets of the tags it matched, plus
+    one bracket per opener guarded here.
+    """
+    if RAW_HTML_PATTERN.match(text) is None and HTML_BLOCK_OPENER.match(text):
+        return "&lt;" + text[1:]
+    return text
 
 
 def render_document(document: DocumentModel) -> str:
@@ -60,10 +113,11 @@ def _render_block(block: Block, comment_lookup: dict[str, Comment]) -> str:
         prefix = f"{'#' * block.heading_level} "
 
     parts: list[str] = [prefix]
-    for fragment in block.fragments:
-        parts.extend("{==" for _comment_id in fragment.start_comment_ids)
-        parts.append(escape_criticmarkup_text(fragment.text))
-        for comment_id in reversed(fragment.end_comment_ids):
+    for group in _contiguous_fragment_groups(block.fragments):
+        parts.extend("{==" for _comment_id in group[0].start_comment_ids)
+        group_text = "".join(fragment.text for fragment in group)
+        parts.append(escape_criticmarkup_text(group_text))
+        for comment_id in reversed(group[-1].end_comment_ids):
             comment = comment_lookup[comment_id]
             parts.extend((
                 "==}",
@@ -73,6 +127,40 @@ def _render_block(block: Block, comment_lookup: dict[str, Comment]) -> str:
             ))
 
     return "".join(parts)
+
+
+def _contiguous_fragment_groups(
+    fragments: tuple[Fragment, ...],
+) -> typ.Iterator[tuple[Fragment, ...]]:
+    """Group adjacent fragments that no comment boundary separates.
+
+    Word splits a paragraph into runs wherever formatting changes, so text a
+    reader sees as one token can arrive as several fragments. Escaping each
+    fragment on its own would let them reassemble into a live construct that
+    neither contains alone: ``<scr`` followed by ``ipt>`` renders an active
+    HTML tag, and ``{`` followed by ``==`` renders a live CriticMarkup opener.
+
+    A comment boundary still splits a group, because the markers rendered
+    between two texts cannot be spanned by a delimiter formed from them.
+    """
+    group: list[Fragment] = []
+    for fragment in fragments:
+        if group and _separates_comment_boundary(group[-1], fragment):
+            yield tuple(group)
+            group = []
+        group.append(fragment)
+    if group:
+        yield tuple(group)
+
+
+def _separates_comment_boundary(previous: Fragment, current: Fragment) -> bool:
+    """Report whether rendering ``previous`` emits markers before ``current``.
+
+    Markers are emitted where a range ends or begins, so any boundary id on
+    either side of the join puts rendered markup between the two texts. Text on
+    opposite sides of that markup cannot reassemble into one construct.
+    """
+    return bool(previous.end_comment_ids or current.start_comment_ids)
 
 
 def format_comment_reference(comment: Comment) -> str:
@@ -129,11 +217,13 @@ def escape_criticmarkup_text(text: str) -> str:
 
 
 def _escape_markdown_text(text: str) -> str:
-    """Neutralize raw HTML and Markdown-link syntax in untrusted text."""
+    """Neutralize raw HTML, Markdown-link syntax, and source backslashes."""
     escaped = text
     for source, replacement in MARKDOWN_TEXT_ESCAPE_SEQUENCES:
         escaped = escaped.replace(source, replacement)
-    return RAW_HTML_PATTERN.sub(r"&lt;\g<content>&gt;", escaped)
+    escaped = RAW_HTML_PATTERN.sub(r"&lt;\g<content>&gt;", escaped)
+    # Last, so the entity it inserts is not escaped again by the '&' rule.
+    return _neutralize_html_block_openers(escaped)
 
 
 __all__ = [

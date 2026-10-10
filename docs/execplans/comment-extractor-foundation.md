@@ -442,6 +442,35 @@ repository quality gates.
 - [x] 2026-07-23: Addressed review follow-up by adding an injectable document
   loader and explicit extraction error, expanding CLI validation coverage,
   documenting developer workflows, and adding bounded structured events.
+- [x] 2026-10-11: Rebuilt the property suite in response to the proof
+  assessment. The escape oracle now asserts consumer semantics (odd-length
+  backslash runs, ranges consumed as units) rather than lexical shape, and the
+  oracles moved to `tests/support_renderer_oracles.py` so they can be tested
+  directly. Added `tests/unit/test_renderer_oracle_fidelity.py` (calibrated
+  against `markdown-it-py` over 35 cases) and
+  `tests/unit/test_renderer_oracle_sensitivity.py` (mutation-tests the
+  oracles). Added a highlight-span oracle, which the previous suite lacked.
+- [x] 2026-10-11: Fixed a renderer defect found while building the new oracle.
+  A block beginning with an unclosed HTML-block opener such as a bare `<!--`
+  rendered as a CommonMark `html_block` that runs to the next blank line,
+  swallowing the renderer's own CriticMarkup markers and every later block.
+  `HTML_BLOCK_OPENER` and `_neutralize_html_block_openers` now entity-escape
+  the leading bracket of an unmatched opener, at the start of the rendered text
+  only. The measurement that established the superseded behaviour is recorded
+  in the Decision Log.
+- [x] 2026-10-11: Added the regressions the ExecPlan assessment required:
+  DOCX-level tests for tags and delimiters split across Word runs, including
+  the case where a comment boundary must split the escaped text; consumer-level
+  backslash-parity assertions driven through the whole extract-and-render path;
+  coverage for the previously untested `unbalanced-comment-range` warning code
+  across its three rejection reasons; and CLI tests for well-formed ZIP
+  packages whose OOXML internals are invalid, asserting exit status 2 and no
+  leaked traceback.
+- [x] 2026-10-11: Corrected stale documentation. The sample-excerpt snapshot
+  claim was false: the supplied `.docx` is not in the repository and no
+  snapshot references it, so three documents were amended to describe it as the
+  manual smoke test it is. The property-suite sections of the design document
+  and developers' guide were rewritten for the new oracle set.
 
 ## Surprises & Discoveries
 
@@ -672,6 +701,46 @@ repository quality gates.
 
   No production defect was found, so `renderer.py` is unchanged by this work.
 
+- 2026-10-11: Three oracle bugs were found by measuring rather than reasoning,
+  and in two of the three the oracle was wrong rather than the renderer.
+
+  - A count-based composition check reported `{====}{>>@a0@<<}{=={==}{>>@a1@<<}`
+    as assembling a live `{==` in prose. An anchored reader model showed it
+    consumes `{=={==}{>>@a1@<<}` as **one** range whose text is `{`, so no
+    defect exists. The check was replaced with one that models consumption.
+  - The range oracle then reported a false positive on
+    `{==<!==}{>>@a1@<<}`, because it contributed the range delimiters to the
+    compared text and a later marker's `>` completed an inert `<!`. It now
+    contributes the interior only.
+  - The first raw-HTML calibration pattern silently accepted five wrong
+    inputs, including `<script&gt;` (the entity continues the tag name, so no
+    reader sees an opener) and `<!x` (a declaration needs an uppercase letter).
+    Each was fixed only after measuring `markdown-it-py`'s verdict directly.
+    The oracle now agrees with the parser on all 64 corpus cases.
+
+  The working rule this establishes: when an oracle and the implementation
+  disagree, measure the consumer's actual behaviour before changing either.
+
+- 2026-10-11: A sensitivity test that had been written to "catch" the
+  boundary-insensitive mutation was passing for the wrong reason, and a
+  follow-up attempt asserted a violation that did not occur. Probing six
+  candidate shapes showed the mutant is behaviourally equivalent to the healthy
+  renderer on the original input: when the first fragment of a split construct
+  is entirely inside a comment, both renderings are consumed as one range. The
+  shape that actually distinguishes them is a comment whose whole extent is the
+  first half of a construct followed by uncommented text, where the healthy
+  renderer closes the range and the mutant never emits it. The test now asserts
+  the range count drops, which is the defect, rather than a keyword that
+  happened to match a guess.
+
+- 2026-10-11: The repository had no test anywhere asserting that standard
+  error is free of a Python traceback, and no CLI case for a well-formed ZIP
+  whose OOXML internals are invalid. The existing corrupt-package fixture is a
+  text file, so it fails as an archive rather than as XML. Two fixtures were
+  added — one with a truncated `word/document.xml`, one with a paragraph whose
+  `w:pStyle` omits the required `w:val` — and both produce exit status 2 with a
+  clean message.
+
 ## Outcomes & Retrospective
 
 The first release is complete. The tool now provides a single
@@ -718,3 +787,38 @@ generated `typos.toml` is rewritten whenever the `spelling` gate runs, because
 shared dictionary. A rebase therefore tends to carry an incidental `typos.toml`
 refresh alongside its intended changes, which is best committed separately so
 the substantive diff stays legible.
+
+A review round then produced two assessments that both declined to clear the
+implementation, and the work they prompted is the most substantial change to
+the test suite since the first release. The ExecPlan assessment asked for
+escaped text to be handled over contiguous logical text while comment
+boundaries are preserved, plus DOCX and renderer regressions for tags and
+delimiters split across runs, and consumer-level backslash-parity assertions.
+The proof assessment asked for a strengthened range oracle, the `(?<!\\)`
+oracle replaced with consumer semantics, composition safety over the final
+rendered output, coverage claims aligned with the generated domain, and a
+reproducible sensitivity audit. All of those are now in place.
+
+Two lessons from that round generalize beyond this repository. First, an oracle
+that is only exercised by the test it supports proves nothing, which is why the
+oracles now live in a shared module with their own fidelity and sensitivity
+tests; the sensitivity test demonstrates rejection of three deliberate
+mutations and acceptance of the unmutated renderer. Second, a property test can
+be sensitive to a mutation and still be testing the wrong invariant — the
+boundary mutation is caught by the range count, not by the composition oracle
+that first claimed to catch it. A mutation caught for the wrong reason is not
+evidence, so each assertion was traced back to the defect it actually observes.
+
+Building the consumer-faithful oracle also found a real renderer defect that
+four earlier rounds of review and a twenty-mutation audit had missed: an
+unclosed HTML-block opener at the start of a block swallowed the renderer's own
+CriticMarkup markers, because CommonMark runs such a block to the next blank
+line. That is a direct consequence of the proof assessment's request to model
+what a consumer actually does rather than what the code appears to do.
+
+Two documentation defects were corrected at the same time, both of which had
+survived several reviews. Three documents claimed a `syrupy` snapshot of the
+supplied sample document, but that file is not in the repository and no
+snapshot references it; they now describe the manual smoke test it really is.
+The property-suite sections of the design document and developers' guide
+described the superseded oracle and are rewritten for the current suite.

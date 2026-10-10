@@ -145,4 +145,6 @@ uv run python -m docx_comment_extractor.cli \
 ```
 
 In the reference run used during implementation, the generated Markdown
-contained 247 inline comments and 247 highlighted spans.
+contained 247 inline comments and 247 highlighted spans. The sample document is
+not checked into the repository, so this step is a manual check rather than an
+automated test; you need your own copy of the file to run it.

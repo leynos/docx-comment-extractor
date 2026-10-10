@@ -296,6 +296,75 @@ def build_oversized_uncompressed_docx(path: Path) -> Path:
     return path
 
 
+def build_malformed_xml_docx(path: Path) -> Path:
+    """Create a well-formed ZIP package whose main document part is not XML.
+
+    The package is structurally a valid OOXML container, so it passes the size,
+    member-count, and archive checks and is opened by the loader. Its
+    ``document.xml`` then fails to parse, which is the failure the CLI must
+    report as a clean status-2 error rather than an unhandled traceback.
+
+    Truncating the part rather than replacing it keeps the ZIP directory and the
+    ``[Content_Types].xml`` declaration intact, so parsing really is the first
+    thing that fails.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
+    document = Document()
+    document.add_paragraph("Alpha")
+    document.save(str(path))
+
+    with ZipFile(path, "r") as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+
+    damaged = members["word/document.xml"]
+    # Cut the part mid-element so the XML is unterminated rather than empty.
+    members["word/document.xml"] = damaged[: len(damaged) // 2]
+
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    return path
+
+
+def build_missing_style_attribute_docx(path: Path) -> Path:
+    """Create a document whose paragraph style element lacks its required value.
+
+    ``w:pStyle`` requires a ``w:val`` attribute. A paragraph carrying the
+    element without one is serialized as well-formed XML, so the package parses
+    and the extractor reaches the point of reading the style, where the
+    malformed attribute has to be handled rather than raised.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
+    document = Document()
+    paragraph = document.add_paragraph("Styled without a value")
+    properties = paragraph._p.get_or_add_pPr()
+    style = OxmlElement("w:pStyle")
+    # Deliberately omit w:val, which the schema requires.
+    properties.insert(0, style)
+    document.save(str(path))
+    return path
+
+
 def build_fixture(name: str, path: Path) -> Path:
     """Build a named fixture document at ``path``.
 

@@ -89,12 +89,16 @@ The test suite has four complementary layers:
 - Behavioural tests invoke the module entry point in a subprocess and verify
   standard streams, output files, and path-validation failures.
 - Snapshot tests preserve complete rendered output for deterministic synthetic
-  fixtures and an excerpt from the supplied sample document.
+  fixtures. The supplied sample document is not checked into the repository, so
+  it cannot back a snapshot; its output is verified by the manual smoke test
+  recorded in the users' guide instead.
 
 ### Property tests
 
-`tests/unit/test_renderer_properties.py` covers five properties with
-Hypothesis: one for reconstruction and four for escaping.
+`tests/unit/test_renderer_properties.py` covers six properties with Hypothesis:
+two for reconstruction and four for escaping. The oracles they assert against
+live in `tests/support_renderer_oracles.py`, so that a second test can validate
+the oracles themselves.
 
 `test_render_preserves_source_text_and_range_structure` generates a bounded
 `DocumentModel`. Comment ranges are laid out as disjoint spans over a stream of
@@ -104,13 +108,21 @@ adjacent ranges, empty fragments, blocks with no fragments at all, and headings
 at every level. Ranges never nest or overlap, which matches the supported range
 semantics in the design document.
 
-Two independent oracles check the rendered Markdown. The reconstruction oracle
-splits the output on the blank line between blocks, deletes only the documented
-range markers and comment bodies, and asserts that what remains is the source
-text with heading prefixes and block joins, in source order. The range oracle
-walks the output as a token stream, pairs every close with the start it belongs
-to using a stack, and asserts that each range closes exactly once, after its
-matching start, in source order.
+`test_render_is_safe_across_fragment_boundaries` generates the same model shape
+over an alphabet of reactive characters, so that adjacent fragments can
+reassemble a construct neither fragment contains, and asserts the rendered
+output is inert to a consumer.
+
+Three independent oracles check the rendered Markdown. The reconstruction
+oracle splits the output on the blank line between blocks, deletes only the
+documented range markers and comment bodies, and asserts that what remains is
+the source text with heading prefixes and block joins, in source order. The
+range oracle walks the output as a token stream, pairs every close with the
+start it belongs to using a stack, and asserts that each range closes exactly
+once, after its matching start, in source order. The highlight oracle walks the
+model and asserts each rendered highlight encloses exactly its own source span;
+without it, a rendering that preserved the text and balanced the markers could
+still highlight the wrong span.
 
 The generator avoids delimiter and ampersand characters in document text. That
 keeps the reconstruction oracle free of any escaping logic, so it cannot
@@ -121,39 +133,64 @@ Four escaping properties cover `escape_criticmarkup_text`:
 - `test_escape_neutralizes_every_live_construct` joins arbitrary text —
   including every CriticMarkup delimiter, Unicode, backslashes, raw HTML
   samples, and Markdown link syntax — and asserts that no delimiter, square
-  bracket, entity, or complete raw HTML tag survives unguarded.
+  bracket, entity, or live raw HTML construct survives unguarded.
 - `test_escape_preserves_text_outside_documented_transformations` inverts the
   documented escapes and asserts the original text is recovered.
 - `test_escape_leaves_inert_text_untouched` asserts that text built only from
   characters used by no escape sequence is returned byte for byte, backslashes
   included.
 - `test_escape_consumes_exactly_the_raw_html_tags_it_matches` asserts that
-  escaping consumes exactly the raw HTML tags it matches: the escaped output
-  contains one fewer `<` and one fewer `>` than the input per matched tag, and
-  no matched tag survives intact. The count is anchored to the input rather
-  than searched in the output: the pattern preserves a matched tag's content
-  verbatim, so a literal `<` inside that content can be re-matched against the
-  output and report a false positive.
+  escaping consumes exactly the brackets it accounts for: one closing bracket
+  per matched tag, and one opening bracket per matched tag plus one per
+  HTML-block opener the guard neutralizes. The count is anchored to the input
+  rather than searched in the output: the pattern preserves a matched tag's
+  content verbatim, so a literal `<` inside that content can be re-matched
+  against the output and report a false positive.
+
+The escape properties assert consumer semantics rather than lexical shape. A
+CommonMark reader treats a character as escaped only when an odd-length
+backslash run precedes it, and a CriticMarkup reader consumes a whole range at
+a time, so delimiter-like text inside one is content rather than markup.
+Checking for a preceding backslash without counting the run passed a live
+Markdown link assembled from a source backslash; that case is now a pinned
+example.
+
+#### Validating the oracles
+
+Two further modules check the oracles rather than the renderer.
+
+`tests/unit/test_renderer_oracle_fidelity.py` calibrates the raw-HTML oracle
+against `markdown-it-py` over a corpus of live constructs, near-misses such as
+`<a~>` and `<script&gt;`, and the residues real escaping leaves behind. It also
+runs the real escape function over a sample set and asserts the output contains
+no token a CommonMark parser recognizes. `markdown-it-py` is deliberately not
+declared as a project dependency; it is present in the development environment
+and the module skips when it is absent.
+
+`tests/unit/test_renderer_oracle_sensitivity.py` mutates the renderer with
+`monkeypatch`, one behaviour at a time, and shows the oracle rejects the
+result. It covers per-fragment escaping, grouping that ignores comment
+boundaries, and a removed backslash-doubling rule, with a control case
+confirming the unmutated renderer is accepted.
 
 Limits of the coverage. The round-trip oracle uses an alphabet without
 backslashes, because an input that already contains an escape sequence cannot
 be recovered unambiguously by inverting the documented transformations; text
 that already carries escapes is covered by the neutralization and inert-text
-properties instead. Neutralization is checked soundly rather than completely: a
-delimiter preceded by a source backslash is accepted as already guarded.
-Idempotence is deliberately not asserted, because escaping an already escaped
-string can add backslashes. The reconstruction generator does not model nested
-or overlapping ranges, which the extractor does not produce. Consequently the
-order in which the renderer emits several comment ends attached to a single
-fragment is not observable under the supported semantics: ranges would have to
-share their final fragment, and sharing a slot is overlap.
+properties instead. Idempotence is deliberately not asserted, because escaping
+an already escaped string can add backslashes. The reconstruction generator
+does not model nested or overlapping ranges, which the extractor does not
+produce. Consequently the order in which the renderer emits several comment
+ends attached to a single fragment is not observable under the supported
+semantics: ranges would have to share their final fragment, and sharing a slot
+is overlap. The composition property's domain excludes malformed and
+overlapping ranges as well; those are covered by the extractor and CLI tests
+instead.
 
-Each delimiter, a bare ampersand, and a raw HTML span containing a delimiter
-are pinned with `@example` in addition to being generated. Drawing them is not
-enough on every run, and a property whose sensitivity depends on the draw can
-pass a defective build by luck. The suite detects nineteen of twenty injected
-defects in `renderer.py` on every run; the twentieth is the unobservable case
-above.
+Each delimiter, a bare ampersand, a source-backslash link, and a raw HTML span
+containing a delimiter are pinned with `@example` in addition to being
+generated. Drawing them is not enough on every run, and a property whose
+sensitivity depends on the draw can pass a defective build by luck.
 
 ## Structured observability
 

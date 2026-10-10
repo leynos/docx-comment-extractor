@@ -18,7 +18,11 @@ from rich.console import Console
 
 from docx_comment_extractor import cli
 from docx_comment_extractor.extractor import ExtractionError
-from tests.support_documents import build_fixture
+from tests.support_documents import (
+    build_fixture,
+    build_malformed_xml_docx,
+    build_missing_style_attribute_docx,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -324,6 +328,49 @@ def test_main_presents_extraction_errors_cleanly(
     )
     assert metrics.snapshot().duration_totals_ms == {"extraction": 250.0}, (
         "the injected clock should determine the recorded failure duration"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "builder"),
+    [
+        ("malformed-xml", build_malformed_xml_docx),
+        ("missing-style-value", build_missing_style_attribute_docx),
+    ],
+)
+def test_main_reports_malformed_docx_packages_without_a_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    name: str,
+    builder: typ.Callable[[Path], Path],
+) -> None:
+    """A structurally invalid package should exit 2 with a clean message.
+
+    The fixtures are well-formed ZIP containers, so they pass every archive
+    check and reach the loader. What fails is the OOXML inside: one has an
+    unterminated document part, the other a paragraph whose style element is
+    missing the value the schema requires. Both must be reported as an
+    extraction failure.
+
+    The absence of ``Traceback`` is the point. Python prints a traceback to
+    standard error for an unhandled exception, so a regression that lets a
+    vendor exception escape the extraction boundary shows up here as a leaked
+    traceback rather than as a wrong exit status.
+    """
+    document_path = builder(tmp_path / f"{name}.docx")
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main([str(document_path)], clock=lambda: 0.0)
+
+    captured = capsys.readouterr()
+    assert "Could not extract the Word document." in captured.err, (
+        "the CLI should name the failure in user-facing terms"
+    )
+    assert "Traceback" not in captured.err, (
+        f"the failure should be handled, not raised: {captured.err!r}"
+    )
+    assert "Traceback" not in captured.out, (
+        f"no traceback should reach standard output either: {captured.out!r}"
     )
 
 

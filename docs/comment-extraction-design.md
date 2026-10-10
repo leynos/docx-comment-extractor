@@ -71,6 +71,14 @@ start and end markers rather than a general overlap graph.
   with backslashes before rendering.
 - Raw HTML and Markdown link syntax in source text or comment bodies are
   neutralized before rendering so untrusted content remains literal text.
+- Escaping also covers a fragment that *begins* with an HTML-block opener and
+  never closes it, such as a bare `<!--` or `<script`. CommonMark begins an
+  HTML block at the start of a line for these prefixes and runs the block to
+  the next blank line, so an unclosed opener would otherwise swallow the
+  renderer's own CriticMarkup markers along with every later block. The guard
+  applies only at the start of the rendered text, because the same prefixes
+  mid-line are inert and escaping them would be a visible change to text no
+  reader treats as markup.
 
 ## Unsupported content
 
@@ -94,8 +102,10 @@ The test suite combines four layers:
   escaping, described below.
 - Behavioural `pytest-bdd` scenarios that exercise the CLI through
   `python -m docx_comment_extractor.cli`.
-- `syrupy` snapshots that lock down rendered Markdown for synthetic fixtures
-  and for the opening excerpt of the supplied sample document.
+- `syrupy` snapshots that lock down rendered Markdown for synthetic fixtures.
+  The supplied sample document is not checked into the repository, so it cannot
+  back a snapshot; its output is verified by the manual smoke test recorded in
+  the users' guide instead.
 
 Synthetic fixture documents force deterministic comment timestamps by setting a
 fixed `w:date` attribute on each generated comment. Without that override, the
@@ -112,35 +122,60 @@ that cross paragraph boundaries, ranges confined to a single fragment, adjacent
 ranges, empty fragments, blocks with no fragments, and headings at every level.
 Nesting and overlap are excluded, matching the range semantics recorded above.
 
-Two oracles check the rendered output independently of the renderer. The first
-removes only the documented range markers and comment bodies and asserts the
-remainder is the source text with heading prefixes and blank-line joins, in
-source order. The second walks the output as a token stream and asserts that
-every range closes exactly once, after its matching start, in source order.
-Generated document text avoids delimiter and ampersand characters, so the
-reconstruction oracle needs no escaping logic of its own.
+Reconstruction is checked by three oracles that read the rendered output
+independently of the renderer. The first removes only the documented range
+markers and comment bodies and asserts the remainder is the source text with
+heading prefixes and blank-line joins, in source order. The second walks the
+output as a token stream and asserts that every range closes exactly once,
+after its matching start, in source order. The third walks the model rather
+than the output and asserts each highlight encloses exactly its own source
+span; without it, a rendering that preserves the text and balances the markers
+could still highlight the wrong span. Generated document text avoids delimiter
+and ampersand characters, so the reconstruction oracle needs no escaping logic
+of its own.
 
-Escaping is covered by four properties: arbitrary text containing every
-supported delimiter, Unicode, backslashes, raw HTML, and Markdown link syntax
-must leave no delimiter, bracket, entity, or complete raw HTML tag unguarded;
-inverting the documented transformations must recover the original text; text
-that contains no escapable character must be returned unchanged; and the number
-of `<` and `>` characters escaping consumes must equal the number of raw HTML
-tags matched in the input, counted from the input rather than searched in the
-output.
+Escaping is checked by a further three properties: text containing every
+supported delimiter, backslashes, raw HTML, and Markdown link syntax must leave
+no delimiter, bracket, entity, or live raw HTML construct behind; inverting the
+documented transformations must recover the original text; text containing no
+escapable character must be returned unchanged; and the brackets escaping
+consumes must equal the raw HTML tags it matched plus the block openers it
+guarded, counted from the input rather than searched in the output.
+
+The escape properties assert consumer semantics rather than lexical shape, and
+the oracles live in `tests/support_renderer_oracles.py` so that they can be
+tested in their own right. CommonMark treats a character as escaped only when
+an odd-length backslash run precedes it, and a CriticMarkup reader consumes a
+whole range at a time, so delimiter-like text inside one is content rather than
+markup. An earlier form of this check accepted any immediately preceding
+backslash and therefore passed a live Markdown link assembled from a source
+backslash.
+
+Two further tests keep those oracles honest:
+
+- `tests/unit/test_renderer_oracle_fidelity.py` calibrates the raw-HTML oracle
+  against `markdown-it-py` over a corpus of live constructs, near-misses, and
+  escaping residues, and asserts that real escaping output contains no token a
+  CommonMark parser recognizes. `markdown-it-py` is deliberately not a project
+  dependency; the module is present in the development environment and the test
+  skips when it is absent.
+- `tests/unit/test_renderer_oracle_sensitivity.py` deliberately breaks one
+  renderer behaviour at a time and shows the oracle rejects the result. It
+  covers per-fragment escaping, grouping that ignores comment boundaries, and a
+  removed backslash-doubling rule, alongside a control showing the unmutated
+  renderer is accepted.
 
 The coverage has limits worth recording. The round-trip property uses an
 alphabet without backslashes, because an input already containing an escape
 sequence cannot be recovered unambiguously by inverting the documented
-transformations; such input is covered by the other three properties.
-Neutralization is checked soundly rather than completely, since a delimiter
-preceded by a source backslash is accepted as already guarded. Escaping is not
-asserted to be idempotent, because reprocessing escaped input can add
-backslashes. Because ranges are disjoint, the order in which several comment
-ends attached to one fragment are emitted is not observable: disjoint ranges
-cannot share their final fragment. Delimiters, a bare ampersand, and a raw HTML
-span containing a delimiter are pinned with `@example` as well as generated, so
-sensitivity does not depend on the random draw.
+transformations; backslash handling is covered by the safety property instead.
+Escaping is not asserted to be idempotent, because reprocessing escaped input
+can add backslashes. Because ranges are disjoint, the order in which several
+comment ends attached to one fragment are emitted is not observable: disjoint
+ranges cannot share their final fragment. Delimiters, a bare ampersand, a
+source-backslash link, and a raw HTML span containing a delimiter are pinned
+with `@example` as well as generated, so sensitivity does not depend on the
+random draw.
 
 ## Observability
 

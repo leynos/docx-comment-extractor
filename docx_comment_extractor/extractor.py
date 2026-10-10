@@ -11,6 +11,7 @@ from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
+from docx.oxml.exceptions import XmlchemyError
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from lxml.etree import XMLSyntaxError
@@ -29,9 +30,21 @@ MAX_PACKAGE_MEMBERS = 10_000
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 WORD_HEADING_STYLE_RE = re.compile(r"^Heading ?(?P<level>[1-6])$")
 
+# Warning emitted when a comment boundary cannot be honored because the
+# surrounding range structure is malformed; see ``_reconcile_comment_boundaries``.
+_UNBALANCED_RANGE_CODE = "unbalanced-comment-range"
+
 # Single definition of the vendor failures the extraction boundary translates
-# into ``ExtractionError``. Keeping one tuple stops the package-size checks and
-# the document loader from drifting apart in what they consider a broken package.
+# into ``ExtractionError``. Keeping one tuple stops the package-size checks,
+# the document loader, and the metadata and block extraction from drifting
+# apart in what they consider a broken package.
+#
+# ``XmlchemyError`` is the vendor base for a document whose XML does not match
+# the schema its code expects; ``InvalidXmlError`` is the subclass raised when
+# a required attribute such as ``w:author`` is missing. ``python-docx`` 1.2.0
+# reads comment attributes lazily, so those failures surface while comments
+# are being normalized rather than while the package is being opened. It is
+# not a ``ValueError``, so it needs naming here.
 INFRASTRUCTURE_ERRORS = (
     BadZipFile,
     EOFError,
@@ -41,6 +54,7 @@ INFRASTRUCTURE_ERRORS = (
     RuntimeError,
     ValueError,
     XMLSyntaxError,
+    XmlchemyError,
     zlib.error,
 )
 
@@ -104,21 +118,29 @@ def extract_document(
     Raises
     ------
     ExtractionError
-        If the document loader cannot open or decode the Word package.
+        If the Word package cannot be opened, decoded, or read as the schema
+        expects. The same error covers the deferred failures ``python-docx``
+        raises while comment metadata is being read.
 
     """
+    # One boundary covers the whole vendor interaction. ``python-docx`` reads
+    # required comment attributes lazily, so a package that opens cleanly can
+    # still raise while comments or paragraph XML are being read; translating
+    # only the loader would let those escape as tracebacks past the CLI's
+    # handled extraction-error path.
     try:
         if _is_oversized_package(path):
             _raise_oversized_package()
         _validate_package_limits(path)
+        document = document_loader(path)
+        comments = _extract_comments(document)
+        blocks, warnings = _extract_blocks(document)
     except INFRASTRUCTURE_ERRORS as error:
         _raise_extraction_error(error)
-    document = _load_document_for_extraction(path, document_loader)
-    comments = _extract_comments(document)
-    blocks, warnings = _extract_blocks(document)
+    reconciled, boundary_warnings = _reconcile_comment_boundaries(blocks, comments)
     return ExtractionResult(
-        document=DocumentModel(blocks=tuple(blocks), comments=tuple(comments)),
-        warnings=tuple(warnings),
+        document=DocumentModel(blocks=tuple(reconciled), comments=tuple(comments)),
+        warnings=(*warnings, *boundary_warnings),
     )
 
 
@@ -143,17 +165,6 @@ def _raise_oversized_package() -> typ.NoReturn:
     """Stop extraction when the package exceeds its supported size limit."""
     message = "Input document is too large; maximum size is 20 MiB."
     raise ExtractionError(message)
-
-
-def _load_document_for_extraction(
-    path: Path,
-    document_loader: DocumentLoader,
-) -> WordDocument:
-    """Load a package while translating known infrastructure failures."""
-    try:
-        return document_loader(path)
-    except INFRASTRUCTURE_ERRORS as error:
-        _raise_extraction_error(error)
 
 
 def _raise_extraction_error(error: Exception) -> typ.NoReturn:
@@ -351,6 +362,169 @@ def _close_on_previous_block(blocks: list[Block], comment_id: str) -> bool:
         )
         return True
     return False
+
+
+class _RangeReconciler:
+    """Validate comment boundaries while walking a model in document order.
+
+    This release renders disjoint comment ranges one at a time, which is what
+    Word writes and what the supplied sample contains. A boundary the model
+    cannot render as balanced, fully resolved markup is dropped here and
+    reported as a warning, so a malformed document degrades to literal text
+    instead of raising a ``KeyError`` while rendering or emitting an unmatched
+    delimiter.
+
+    At most one range is open at any point. A start that would nest inside an
+    open range, an end that matches no open range, and an open range that
+    reaches the document's end all fail that test. Rejection is recorded rather
+    than raised because one malformed marker should not discard an otherwise
+    readable document; the warnings keep the loss visible.
+    """
+
+    def __init__(self, known_ids: set[str]) -> None:
+        """Track range state against the identifiers the model actually has."""
+        self._known_ids = known_ids
+        self._open_id: str | None = None
+        self._open_position: tuple[int, int] | None = None
+        self.warnings: list[ExtractionWarning] = []
+
+    def reconcile_fragment(
+        self,
+        fragment: Fragment,
+        *,
+        position: tuple[int, int],
+    ) -> Fragment:
+        """Return the fragment with only its renderable boundaries kept."""
+        starts = self._accept_starts(position, fragment.start_comment_ids)
+        ends = self._accept_ends(fragment.end_comment_ids)
+        if starts == fragment.start_comment_ids and ends == fragment.end_comment_ids:
+            return fragment
+        return dc.replace(
+            fragment,
+            start_comment_ids=starts,
+            end_comment_ids=ends,
+        )
+
+    def unclosed_range(self) -> tuple[str, tuple[int, int]] | None:
+        """Report an open range and return where its start marker must go."""
+        if self._open_id is None or self._open_position is None:
+            return None
+        comment_id = self._open_id
+        position = self._open_position
+        self._reject(
+            "commentRangeStart",
+            comment_id,
+            "the range never closes in this document",
+        )
+        return comment_id, position
+
+    def _accept_starts(
+        self,
+        position: tuple[int, int],
+        comment_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Return the start markers that can open a renderable range."""
+        accepted: list[str] = []
+        for comment_id in comment_ids:
+            if comment_id not in self._known_ids:
+                self._reject(
+                    "commentRangeStart",
+                    comment_id,
+                    "the document contains no comment with that identifier",
+                )
+            elif self._open_id is not None:
+                self._reject(
+                    "commentRangeStart",
+                    comment_id,
+                    "the range would nest inside an already-open comment range",
+                )
+            else:
+                self._open_id = comment_id
+                self._open_position = position
+                accepted.append(comment_id)
+        return tuple(accepted)
+
+    def _accept_ends(self, comment_ids: tuple[str, ...]) -> tuple[str, ...]:
+        """Return the end markers that close the currently open range."""
+        accepted: list[str] = []
+        for comment_id in comment_ids:
+            if comment_id != self._open_id:
+                self._reject(
+                    "commentRangeEnd",
+                    comment_id,
+                    "no open comment range matches this end marker",
+                )
+                continue
+            self._open_id = None
+            self._open_position = None
+            accepted.append(comment_id)
+        return tuple(accepted)
+
+    def _reject(self, marker_name: str, comment_id: str, reason: str) -> None:
+        """Record one dropped boundary as a stable warning."""
+        self.warnings.append(_unbalanced_range_warning(marker_name, comment_id, reason))
+
+
+def _reconcile_comment_boundaries(
+    blocks: list[Block],
+    comments: list[Comment],
+) -> tuple[list[Block], list[ExtractionWarning]]:
+    """Drop comment boundaries that cannot render as balanced CriticMarkup.
+
+    ``python-docx`` and Word can both produce marker sequences this release's
+    rendering model cannot express: a marker naming a comment the document does
+    not contain, an end with no matching start, or a range that opens and never
+    closes. Rendering such a model raises a ``KeyError`` or emits an unmatched
+    delimiter, so every boundary is validated here, at the extraction boundary,
+    where the failure can be reported instead of thrown.
+
+    Nested and overlapping ranges are outside the supported range model, so a
+    start that would nest is rejected like any other unrenderable boundary.
+    """
+    reconciler = _RangeReconciler({comment.comment_id for comment in comments})
+    fragments_by_block: list[list[Fragment]] = [
+        [
+            reconciler.reconcile_fragment(
+                fragment,
+                position=(block_index, fragment_index),
+            )
+            for fragment_index, fragment in enumerate(block.fragments)
+        ]
+        for block_index, block in enumerate(blocks)
+    ]
+    _drop_unclosed_start(fragments_by_block, reconciler.unclosed_range())
+    reconciled = [
+        dc.replace(block, fragments=tuple(fragments))
+        for block, fragments in zip(blocks, fragments_by_block, strict=True)
+    ]
+    return reconciled, reconciler.warnings
+
+
+def _drop_unclosed_start(
+    fragments_by_block: list[list[Fragment]],
+    unclosed: tuple[str, tuple[int, int]] | None,
+) -> None:
+    """Remove the start marker of a range that never reached its end."""
+    if unclosed is None:
+        return
+    comment_id, (block_index, fragment_index) = unclosed
+    fragment = fragments_by_block[block_index][fragment_index]
+    fragments_by_block[block_index][fragment_index] = dc.replace(
+        fragment,
+        start_comment_ids=tuple(
+            kept for kept in fragment.start_comment_ids if kept != comment_id
+        ),
+    )
+
+
+def _unbalanced_range_warning(
+    marker_name: str,
+    comment_id: str,
+    reason: str,
+) -> ExtractionWarning:
+    """Warn when a comment boundary cannot render as balanced range markup."""
+    message = f"Ignoring a {marker_name} for comment {comment_id}: {reason}."
+    return ExtractionWarning(code=_UNBALANCED_RANGE_CODE, message=message)
 
 
 def _unattached_marker_warning(
