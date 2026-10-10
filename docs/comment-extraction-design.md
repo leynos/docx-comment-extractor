@@ -22,9 +22,9 @@ The implementation is split into four modules:
 - `docx_comment_extractor.models` defines immutable document, block, fragment,
   comment, and warning data structures.
 - `docx_comment_extractor.extractor` opens the Word document, normalizes
-  comment metadata, and reconstructs comment ranges from `commentRangeStart`
-  and `commentRangeEnd` markers. Its injectable document loader translates
-  known package and filesystem failures into `ExtractionError`.
+  comment metadata, and reconstructs comment ranges from `commentRangeStart` and
+  `commentRangeEnd` markers. Its injectable document loader translates known
+  package and filesystem failures into `ExtractionError`.
 - `docx_comment_extractor.renderer` serializes the internal model to Markdown
   and CriticMarkup.
 - `docx_comment_extractor.cli` exposes the `cyclopts` command-line interface
@@ -43,14 +43,14 @@ therefore uses a hybrid approach:
 2. Iterate public top-level paragraph and table objects in source order with
    `Document.iter_inner_content()`.
 3. Within each paragraph, use the isolated private-OOXML adapter to detect
-   `commentRangeStart` and `commentRangeEnd`
-   markers and attach those boundaries to text fragments.
+   `commentRangeStart` and `commentRangeEnd` markers and attach those
+   boundaries to text fragments.
 4. Ignore the zero-text `commentReference` runs that Word inserts after comment
    ends.
 
-Access to `Paragraph._element` is confined to
-`_iter_paragraph_xml_children`. This adapter is the single compatibility point
-for future `python-docx` private-interface changes.
+Access to `Paragraph._element` is confined to `_iter_paragraph_xml_children`.
+This adapter is the single compatibility point for future `python-docx`
+private-interface changes.
 
 The supplied sample document contains 247 comments and 46 cross-paragraph
 comment ranges. A quick structure check also showed no nested or overlapping
@@ -147,8 +147,9 @@ sensitivity does not depend on the random draw.
 The CLI records validation, extraction, warning-summary, and output-write
 decisions as structured standard-library logging events. Every event contains
 `operation` and `outcome`. Events may also contain an exception class name in
-`error` or bounded `comment_count` and `warning_count` values. No event contains
-document text, comment bodies, rendered Markdown, or raw filesystem paths.
+`error` or bounded `comment_count` and `warning_count` values. No event
+contains document text, comment bodies, rendered Markdown, or raw filesystem
+paths.
 
 Each CLI invocation owns an injected `OperationMetrics` instance. It maintains
 bounded counters by operation and outcome plus monotonic duration totals, with
@@ -156,11 +157,11 @@ lock-protected records for concurrent callers. `reset()` clears an owner for
 deterministic reuse, and `snapshot()` returns a thread-safe copy. `main` builds
 one runtime dependency bundle per invocation and passes it through the real
 Cyclopts command path, so a single owner and clock serve both the command-path
-boundaries and the terminal-failure handlers. Metric state is not shared
-across invocations or persisted. Failure events use stable categories,
-including `argument_parsing`, rather than requiring consumers to match
-free-form exception text. Metrics contain no document text, comment bodies,
-rendered Markdown, or raw filesystem paths.
+boundaries and the terminal-failure handlers. Metric state is not shared across
+invocations or persisted. Failure events use stable categories, including
+`argument_parsing`, rather than requiring consumers to match free-form
+exception text. Metrics contain no document text, comment bodies, rendered
+Markdown, or raw filesystem paths.
 
 File output uses a same-directory temporary file and atomic replacement, so a
 failed write leaves an existing output file unchanged.

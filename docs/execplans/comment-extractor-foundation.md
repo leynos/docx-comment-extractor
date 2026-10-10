@@ -1,9 +1,8 @@
 # Implement the inline CriticMarkup extraction CLI
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -400,9 +399,9 @@ make nixie
 
 ## Approval gate
 
-Approval was granted on 2026-04-09, and implementation is complete. This gate is
-closed; future changes must update this living plan and follow the repository
-quality gates.
+Approval was granted on 2026-04-09, and implementation is complete. This gate
+is closed; future changes must update this living plan and follow the
+repository quality gates.
 
 ## Progress
 
@@ -527,15 +526,15 @@ quality gates.
 - 2026-09-29: Restack onto the advanced `origin/main` (`39d476d`), which had
   gained a coverage-interpreter contract and action bumps since the previous
   rebase. Two conflicts arose and both preserve intent on each side. The
-  `pyproject.toml` `dev` group takes the union: main's
-  `packaging>=26.3,<27.0` plus the branch's `pytest-bdd`, `syrupy`, and
-  `lxml-stubs`. `docs/developers-guide.md` was an add/add conflict because
-  both branches independently created it; the resolution keeps the branch's
-  six-section guide verbatim, adopts main's introductory sentence, and
-  appends main's `## Coverage workflow contract` section last, which places it
-  after every line the branch's later commits touch so they replay without
-  further conflict. `uv.lock` was regenerated afterwards, moving `packaging`
-  from 26.0 to 26.3 because the merged pin excludes 26.0.
+  `pyproject.toml` `dev` group takes the union: main's `packaging>=26.3,<27.0`
+  plus the branch's `pytest-bdd`, `syrupy`, and `lxml-stubs`.
+  `docs/developers-guide.md` was an add/add conflict because both branches
+  independently created it; the resolution keeps the branch's six-section guide
+  verbatim, adopts main's introductory sentence, and appends main's
+  `## Coverage workflow contract` section last, which places it after every
+  line the branch's later commits touch so they replay without further conflict.
+  `uv.lock` was regenerated afterwards, moving `packaging` from 26.0 to 26.3
+  because the merged pin excludes 26.0.
 
 - 2026-10-03: Put `scripts/` on ty's module search path in both
   `[tool.ty.environment] extra-paths` in `pyproject.toml` and
@@ -549,9 +548,8 @@ quality gates.
   the file from a base without it. Every conflict took the upstream side, per
   the lock-file policy, and `uv lock` rebuilt the file afterwards; no hand
   merge of lock content was attempted. `docs/scripting-standards.md`,
-  `docs/developers-guide.md`, and `pyproject.toml` auto-merged, and the
-  CV-005 text and `.github/cv005.toml` survive alongside the branch's own
-  wording.
+  `docs/developers-guide.md`, and `pyproject.toml` auto-merged, and the CV-005
+  text and `.github/cv005.toml` survive alongside the branch's own wording.
 
 - 2026-10-03: Route the CLI's runtime seams through the real Cyclopts command
   path. Cyclopts can only inject parsing-time values, so a
@@ -568,10 +566,9 @@ quality gates.
 
 - 2026-10-03: Declare `lxml` as a direct runtime dependency. The plan named
   only `python-docx`, `cyclopts`, and `rich`, but the extraction boundary must
-  catch `XMLSyntaxError` from `lxml.etree` when a malformed OOXML package
-  fails to parse, and translate it into `ExtractionError`. Relying on the
-  transitive copy pulled in by `python-docx` would leave the import working but
-  undeclared.
+  catch `XMLSyntaxError` from `lxml.etree` when a malformed OOXML package fails
+  to parse, and translate it into `ExtractionError`. Relying on the transitive
+  copy pulled in by `python-docx` would leave the import working but undeclared.
 
 - 2026-10-03: Validate ZIP package metadata before extraction:
   `MAX_PACKAGE_MEMBERS` rejects packages with more than 10,000 members and
@@ -581,30 +578,30 @@ quality gates.
   metadata checks reject such packages before they are loaded.
 
 - 2026-10-03: Third restack attempt against `origin/main` resolved to an
-  explicit no-op. The target was still `057d323`, which is exactly the
-  boundary the previous restack replayed onto, so `OLD_BASE == TARGET` and
-  there were no commits to replay. The branch is 25 commits ahead, 0 behind.
-  This is the first restack with an empty range, and the earlier two both had
-  real conflicts, so "rebase again" was *not* safe to assume as a repeat of
-  that shape: an empty range is a distinct outcome that warrants a recorded
-  decision rather than a silent rewrite. The boundary was confirmed from
-  three independent sources before being accepted, on the principle that a
-  local tracking ref alone is not evidence — a lesson from the previous
-  restack, where pushes over a command-scoped SSH URL left
-  `origin/comment-extractor-foundation` stale. Here `git rev-parse
-  origin/main`, the GitHub API `git/ref/heads/main` and `commits/main`
-  endpoints, and the PR's `baseRefOid` all agreed on `057d323`. Because
-  nothing was replayed, no conflict resolution, no `uv lock` rebuild, and no
-  lock-file policy application arose. The four required gates were run
-  anyway, since they are a condition of the request rather than of the
-  rewrite: `check-fmt`, `test` (366 passed), `typecheck`, and `lint` were all
-  green on the unchanged candidate `7400c24`, and the tree hash
+  explicit no-op. The target was still `057d323`, which is exactly the boundary
+  the previous restack replayed onto, so `OLD_BASE == TARGET` and there were no
+  commits to replay. The branch is 25 commits ahead, 0 behind. This is the
+  first restack with an empty range, and the earlier two both had real
+  conflicts, so "rebase again" was *not* safe to assume as a repeat of that
+  shape: an empty range is a distinct outcome that warrants a recorded decision
+  rather than a silent rewrite. The boundary was confirmed from three
+  independent sources before being accepted, on the principle that a local
+  tracking ref alone is not evidence — a lesson from the previous restack,
+  where pushes over a command-scoped SSH URL left
+  `origin/comment-extractor-foundation` stale. Here
+  `git rev-parse origin/main`, the GitHub API `git/ref/heads/main` and
+  `commits/main` endpoints, and the PR's `baseRefOid` all agreed on `057d323`.
+  Because nothing was replayed, no conflict resolution, no `uv lock` rebuild,
+  and no lock-file policy application arose. The four required gates were run
+  anyway, since they are a condition of the request rather than of the rewrite:
+  `check-fmt`, `test` (366 passed), `typecheck`, and `lint` were all green on
+  the unchanged candidate `7400c24`, and the tree hash
   `45695d78e454ecd119c6590790d2a7cf14673314` was byte-identical before and
-  after. Weave did not participate: although the driver is registered
-  globally, the repository has no tracked `.gitattributes` and no
-  `.git/info/attributes`, so `git check-attr merge` reports `unspecified` for
-  every path, including `uv.lock`, and Git's built-in merge machinery with
-  `zdiff3` is what would have run.
+  after. Weave did not participate: although the driver is registered globally,
+  the repository has no tracked `.gitattributes` and no `.git/info/attributes`,
+  so `git check-attr merge` reports `unspecified` for every path, including
+  `uv.lock`, and Git's built-in merge machinery with `zdiff3` is what would
+  have run.
 
 - 2026-10-03: Close the "Testing (Property / Proof)" pre-merge warning by
   delivering the property tests the 2026-07-23 entry recommended, rather than
@@ -633,9 +630,9 @@ quality gates.
   of the text-preservation oracle, which compares the whole document at once. A
   bounded form of the assertion survives inside that oracle, which still splits
   the output on the blank-line join and asserts one part per block before
-  comparing the text. The generator still produces the fragment-free cases, with
-  and without a heading prefix (`_empty_block` draws either heading level 2 or
-  none). Both render as exactly one part, the prefix or the empty string,
+  comparing the text. The generator still produces the fragment-free cases,
+  with and without a heading prefix (`_empty_block` draws either heading level
+  2 or none). Both render as exactly one part, the prefix or the empty string,
   because no block content contains a line break; `_expected_plain_text`
   mirrors this by rebuilding a headingless fragment-free block as the empty
   string.
@@ -648,8 +645,7 @@ quality gates.
   *The suite was mutation-tested, and that found generator gaps rather than
   production defects.* Twenty deliberate defects were injected into
   `renderer.py` one at a time. The first pass missed three, and each miss was a
-  real weakness in what the generator could reach, not a defect in the
-  renderer:
+  real weakness in what the generator could reach, not a defect in the renderer:
 
   - Dropping the '&' escape rule was invisible because '&' is not in the inert
     alphabet and the only reachable ampersand came from an `&lt;` sample that
@@ -703,22 +699,22 @@ keeping the branch's intent and folding in main's improvements: the `dev`
 dependency group now carries main's `pyyaml`, `ty`, and `ruff==0.16.8` bump
 alongside the branch's `pytest-bdd` and `syrupy`, and the style-guide spelling
 line kept the branch's concrete example. `uv.lock` was rebuilt after the merge.
-Note that `make lint` and `make check-fmt` pin ruff to 0.14.13 in the `Makefile`
-independently of the `pyproject.toml` dev-group version, so the 0.16.8 bump does
-not change what those gates enforce; CI runs only `make check-fmt`,
-`make lint`, `make spelling`, and `make typecheck`.
+Note that `make lint` and `make check-fmt` pin ruff to 0.14.13 in the
+`Makefile` independently of the `pyproject.toml` dev-group version, so the
+0.16.8 bump does not change what those gates enforce; CI runs only
+`make check-fmt`, `make lint`, `make spelling`, and `make typecheck`.
 
 A second rebase followed the same pattern once `main` advanced again to
 `39d476d`. The add/add conflict on `docs/developers-guide.md` confirmed that
 the two documents are complementary rather than competing: main documents the
 coverage-interpreter contract, whilst the branch documents development setup,
 dependencies, command flow, extraction and rendering boundaries, testing
-strategy, and observability. Recording both in one file keeps the single
-entry point that `README.md` links.
+strategy, and observability. Recording both in one file keeps the single entry
+point that `README.md` links.
 
 The rebase also demonstrated a recurring maintenance cost worth naming: the
 generated `typos.toml` is rewritten whenever the `spelling` gate runs, because
 `scripts/generate_typos_config.py` performs a conditional HTTPS fetch of the
-shared dictionary. A rebase therefore tends to carry an incidental
-`typos.toml` refresh alongside its intended changes, which is best committed
-separately so the substantive diff stays legible.
+shared dictionary. A rebase therefore tends to carry an incidental `typos.toml`
+refresh alongside its intended changes, which is best committed separately so
+the substantive diff stays legible.

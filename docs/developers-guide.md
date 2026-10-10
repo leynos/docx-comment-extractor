@@ -36,12 +36,11 @@ unit, behavioural, and snapshot tests. `lxml-stubs` provides XML typing for
 static analysis. Ruff provides linting and formatting, whilst the
 repository-managed `ty` tool provides static type checking.
 
-The `scripts/` directory holds the shared spelling-policy helper, whose
-modules import each other by flat top-level name. Both the
-`[tool.ty.environment] extra-paths = ["scripts"]` stanza in
-`pyproject.toml` and the `--extra-search-path scripts` flag in
-`make typecheck` put that directory on ty's module search path so those
-imports resolve.
+The `scripts/` directory holds the shared spelling-policy helper, whose modules
+import each other by flat top-level name. Both the
+`[tool.ty.environment] extra-paths = ["scripts"]` stanza in `pyproject.toml`
+and the `--extra-search-path scripts` flag in `make typecheck` put that
+directory on ty's module search path so those imports resolve.
 
 ## Command flow
 
@@ -53,8 +52,8 @@ write failures become concise user-facing errors with exit status 2. File
 output is written through a same-directory temporary file and atomically
 replaced, so a failed write leaves an existing output file unchanged. Both
 supported entry points—the CLI and `extract_document`—reject an on-disk input
-package larger than 20 MiB before extraction; this bound applies to the
-`.docx` input package, not rendered Markdown or output files.
+package larger than 20 MiB before extraction; this bound applies to the `.docx`
+input package, not rendered Markdown or output files.
 
 `extract_document` accepts an injectable `DocumentLoader`. The default loader
 is the only boundary that opens a package through `python-docx`. Known package
@@ -94,8 +93,8 @@ The test suite has four complementary layers:
 
 ### Property tests
 
-`tests/unit/test_renderer_properties.py` covers five properties with Hypothesis:
-one for reconstruction and four for escaping.
+`tests/unit/test_renderer_properties.py` covers five properties with
+Hypothesis: one for reconstruction and four for escaping.
 
 `test_render_preserves_source_text_and_range_structure` generates a bounded
 `DocumentModel`. Comment ranges are laid out as disjoint spans over a stream of
@@ -181,14 +180,13 @@ extraction, warning reporting, and output writes.
 Each CLI invocation owns an injected `OperationMetrics` instance, which keeps
 bounded counters by operation and outcome together with monotonic duration
 totals. Records are protected by a lock for concurrent callers. `reset()`
-clears an owner for deterministic reuse, and `snapshot()` returns a
-thread-safe copy. `main` builds one runtime dependency bundle per invocation
-and passes it through the real Cyclopts command path, so a single owner and
-clock serve both the command-path boundaries and the terminal-failure
-handlers. Invocations do not share metric state, and metrics are not
-persisted. Failure events use stable categories, including
-`argument_parsing`, so consumers do not need to match free-form exception
-text.
+clears an owner for deterministic reuse, and `snapshot()` returns a thread-safe
+copy. `main` builds one runtime dependency bundle per invocation and passes it
+through the real Cyclopts command path, so a single owner and clock serve both
+the command-path boundaries and the terminal-failure handlers. Invocations do
+not share metric state, and metrics are not persisted. Failure events use
+stable categories, including `argument_parsing`, so consumers do not need to
+match free-form exception text.
 
 Events and metrics must not include document text, comment bodies, rendered
 Markdown, or raw filesystem paths. This bounded schema makes decision and
