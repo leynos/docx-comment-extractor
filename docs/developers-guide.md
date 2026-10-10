@@ -94,7 +94,8 @@ The test suite has four complementary layers:
 
 ### Property tests
 
-`tests/unit/test_renderer_properties.py` covers two properties with Hypothesis.
+`tests/unit/test_renderer_properties.py` covers five properties with Hypothesis:
+one for reconstruction and four for escaping.
 
 `test_render_preserves_source_text_and_range_structure` generates a bounded
 `DocumentModel`. Comment ranges are laid out as disjoint spans over a stream of
@@ -116,7 +117,7 @@ The generator avoids delimiter and ampersand characters in document text. That
 keeps the reconstruction oracle free of any escaping logic, so it cannot
 reproduce the algorithm it is checking.
 
-Three escaping properties cover `escape_criticmarkup_text`:
+Four escaping properties cover `escape_criticmarkup_text`:
 
 - `test_escape_neutralizes_every_live_construct` joins arbitrary text —
   including every CriticMarkup delimiter, Unicode, backslashes, raw HTML
@@ -127,6 +128,13 @@ Three escaping properties cover `escape_criticmarkup_text`:
 - `test_escape_leaves_inert_text_untouched` asserts that text built only from
   characters used by no escape sequence is returned byte for byte, backslashes
   included.
+- `test_escape_consumes_exactly_the_raw_html_tags_it_matches` asserts that
+  escaping consumes exactly the raw HTML tags it matches: the escaped output
+  contains one fewer `<` and one fewer `>` than the input per matched tag, and
+  no matched tag survives intact. The count is anchored to the input rather
+  than searched in the output: the pattern preserves a matched tag's content
+  verbatim, so a literal `<` inside that content can be re-matched against the
+  output and report a false positive.
 
 Limits of the coverage. The round-trip oracle uses an alphabet without
 backslashes, because an input that already contains an escape sequence cannot
@@ -151,9 +159,19 @@ above.
 ## Structured observability
 
 The CLI emits bounded structured events through the Python standard library
-logger named `docx_comment_extractor.cli`. The package does not configure a
-handler, format, or logging level; embedding applications and operators retain
-control of those policies.
+logger named `docx_comment_extractor.cli`. Importing the package configures
+nothing: no handler, no format, and no logging level, so embedding applications
+and operators retain control of their own policies.
+
+The console command is the exception, and only when asked. Passing `--verbose`
+installs a CLI-scoped handler on the `docx_comment_extractor.cli` logger for
+the duration of the run and relaxes that logger's level so its records are not
+filtered out. The handler presents the event message followed by its bounded
+`name=value` fields. Both the handler's stream and the logger's level are set
+from the invocation in progress and restored when it ends, so the opt-in never
+leaks into a later call in the same process. Without the flag no handler is
+installed and the events stay inert, which keeps standard error empty on a
+successful run.
 
 Events use `operation` and `outcome` fields. Failure events may add the safe
 exception class name as `error`; successful extraction and warning summaries
@@ -174,9 +192,9 @@ text.
 
 Events and metrics must not include document text, comment bodies, rendered
 Markdown, or raw filesystem paths. This bounded schema makes decision and
-failure points observable without leaking source material. Logging remains
-unconfigured by default: the package installs no handler, formatter, or
-logging level.
+failure points observable without leaking source material. The package itself
+still installs no handler, formatter, or logging level at import; only the
+`--verbose` console run opts into the sink described above.
 
 ## Coverage workflow contract
 

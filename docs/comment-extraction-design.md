@@ -120,16 +120,19 @@ every range closes exactly once, after its matching start, in source order.
 Generated document text avoids delimiter and ampersand characters, so the
 reconstruction oracle needs no escaping logic of its own.
 
-Escaping is covered by three properties: arbitrary text containing every
+Escaping is covered by four properties: arbitrary text containing every
 supported delimiter, Unicode, backslashes, raw HTML, and Markdown link syntax
 must leave no delimiter, bracket, entity, or complete raw HTML tag unguarded;
-inverting the documented transformations must recover the original text; and
-text that contains no escapable character must be returned unchanged.
+inverting the documented transformations must recover the original text; text
+that contains no escapable character must be returned unchanged; and the number
+of `<` and `>` characters escaping consumes must equal the number of raw HTML
+tags matched in the input, counted from the input rather than searched in the
+output.
 
 The coverage has limits worth recording. The round-trip property uses an
 alphabet without backslashes, because an input already containing an escape
 sequence cannot be recovered unambiguously by inverting the documented
-transformations; such input is covered by the other two properties.
+transformations; such input is covered by the other three properties.
 Neutralization is checked soundly rather than completely, since a delimiter
 preceded by a source backslash is accepted as already guarded. Escaping is not
 asserted to be idempotent, because reprocessing escaped input can add
@@ -163,8 +166,16 @@ File output uses a same-directory temporary file and atomic replacement, so a
 failed write leaves an existing output file unchanged.
 
 The package deliberately leaves handlers, formatting, and logging levels
-unconfigured. Applications embedding the public API and command operators can
-apply local logging policy without import-time side effects.
+unconfigured at import. Applications embedding the public API and command
+operators can apply local logging policy without import-time side effects.
+
+The console command can opt into a default sink with `--verbose`, which
+installs one CLI-scoped handler on the `docx_comment_extractor.cli` logger for
+that run. The handler targets the standard error stream in place at invocation
+time, and the run restores the logger's previous level when it finishes, so the
+opt-in is scoped to the invocation rather than the process. Without the flag
+the events stay inert and the standalone command writes nothing extra to
+standard error.
 
 ## Sample smoke run
 

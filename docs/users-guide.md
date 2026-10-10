@@ -11,7 +11,7 @@ comment markers.
 The CLI installs as:
 
 ```bash
-docx-comment-extractor INPUT.docx [--output OUTPUT.md]
+docx-comment-extractor INPUT.docx [--output OUTPUT.md] [--verbose]
 ```
 
 Run the module entry point directly as well:
@@ -67,6 +67,21 @@ docx-comment-extractor draft.docx --output draft.md
 File output is written through a same-directory temporary file and atomically
 replaced. An existing output file remains unchanged if writing or replacement
 fails. The CLI rejects an output path that aliases the input document.
+
+## Verbose logging
+
+Passing `--verbose` (or `-v`) makes the command emit bounded structured
+operational events to standard error. The option is off by default; without it
+the events stay inert and the command writes nothing extra to standard error.
+
+```bash
+docx-comment-extractor draft.docx --output draft.md --verbose
+```
+
+The events carry `operation` and `outcome` fields together with counters and
+durations. They never include document text, comment bodies, rendered Markdown,
+or file paths. The option affects only that one run: the logger's level and
+sink are restored when the run ends.
 
 ## Output format
 

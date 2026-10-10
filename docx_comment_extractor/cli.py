@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 from contextlib import suppress
 from pathlib import Path
 
-from cyclopts import App
+from cyclopts import App, Parameter
 from cyclopts.exceptions import CycloptsError
 from rich.console import Console
 from rich.panel import Panel
@@ -26,10 +26,52 @@ from .renderer import render_document
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-STDOUT_CONSOLE = Console(file=sys.stdout)
-STDERR_CONSOLE = Console(file=sys.stderr, stderr=True)
 APP_HELP = "Extract Word comments into inline CriticMarkup Markdown."
 LOGGER = logging.getLogger(__name__)
+# The console command opts into a log sink with ``--verbose``. Only these
+# documented event fields are ever formatted, so the sink stays bounded and a
+# future field cannot leak document content or paths into terminal output.
+_EVENT_FIELD_NAMES = (
+    "operation",
+    "outcome",
+    "error",
+    "error_category",
+    "comment_count",
+    "warning_count",
+    "duration_ms",
+    "duration_total_ms",
+    "operation_count",
+)
+_LOG_SINK_ATTRIBUTE = "_docx_comment_extractor_cli_log_sink"
+# Above CRITICAL, a retained sink emits nothing until an invocation opts in.
+_DISABLED_HANDLER_LEVEL = logging.CRITICAL + 1
+
+
+class _BoundedEventFormatter(logging.Formatter):
+    """Render one CLI event message followed by its bounded fields."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Append the event's documented ``name=value`` fields to the text."""
+        fields = " ".join(
+            f"{name}={getattr(record, name)}"
+            for name in _EVENT_FIELD_NAMES
+            if hasattr(record, name)
+        )
+        return f"{super().format(record)} {fields}".rstrip()
+
+
+@dataclasses.dataclass
+class _LogSink:
+    """Own the CLI's opt-in log handler and the level it changed.
+
+    ``restore_level`` is the CLI logger's level from before a verbose run
+    opened it, or ``None`` when no run currently has it open. Remembering the
+    original value lets a verbose run restore an embedder's own level rather
+    than overwriting it with the package default.
+    """
+
+    handler: logging.StreamHandler
+    restore_level: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -93,7 +135,13 @@ class _RenderedDocument:
 
 @dataclasses.dataclass(frozen=True)
 class _RuntimeDependencies:
-    """Own the narrow runtime seams used by CLI orchestration."""
+    """Own the narrow runtime seams used by CLI orchestration.
+
+    The console pair is built from the streams that exist when an invocation
+    starts, so a caller that replaces ``sys.stdout``/``sys.stderr`` after
+    import (a test harness, a wrapper, or a notebook) still sees CLI output.
+    A module-level ``Console`` would pin the import-time streams instead.
+    """
 
     metrics: OperationMetrics
     output_writer: typ.Callable[[Path, str], None]
@@ -101,6 +149,8 @@ class _RuntimeDependencies:
     input_validator: typ.Callable[[Path], Path]
     output_validator: typ.Callable[[Path, Path], None]
     stdout: typ.Callable[[str], object]
+    stdout_console: Console
+    stderr_console: Console
 
 
 class UserFacingError(Exception):
@@ -153,9 +203,24 @@ def _command_bound_to(
     travels by closure instead of through ``Parameter(parse=False)``. The
     returned callable keeps the documented ``(input_docx, output)`` signature,
     and reuses the public command docstring that Cyclopts renders as help.
+    ``verbose`` is a parsing-time value and so binds directly, which keeps the
+    opt-in visible in the generated help.
     """
 
-    def command(input_docx: Path, output: Path | None = None) -> None:
+    def command(
+        input_docx: Path,
+        output: Path | None = None,
+        *,
+        verbose: typ.Annotated[
+            bool,
+            Parameter(
+                alias="-v",
+                negative=False,
+                help="Emit bounded operational events to standard error.",
+            ),
+        ] = False,
+    ) -> None:
+        _install_log_sink(enabled=verbose, console=dependencies.stderr_console)
         _run_extraction(input_docx, output, dependencies=dependencies)
 
     # One source of truth for the command help text; the public function is
@@ -177,10 +242,12 @@ def _production_dependencies(
 ) -> _RuntimeDependencies:
     """Assemble the production runtime seams for one invocation.
 
-    This is the only place that decides which concrete metrics owner and clock
-    an invocation uses, so the command path and the terminal-failure handlers
-    cannot diverge. ``main`` passes its injected seams through; callers that
-    supply nothing get the production defaults.
+    This is the only place that decides which concrete metrics owner, clock,
+    and console pair an invocation uses, so the command path and the
+    terminal-failure handlers cannot diverge. ``main`` passes its injected
+    seams through; callers that supply nothing get the production defaults.
+    The consoles are built here rather than at module level so they observe the
+    streams that exist when the invocation starts.
     """
     return _RuntimeDependencies(
         metrics=metrics or OperationMetrics(),
@@ -189,7 +256,66 @@ def _production_dependencies(
         input_validator=_validate_input_path,
         output_validator=_validate_output_path,
         stdout=sys.stdout.write,
+        stdout_console=Console(file=sys.stdout),
+        stderr_console=Console(file=sys.stderr, stderr=True),
     )
+
+
+def _install_log_sink(*, enabled: bool, console: Console) -> None:
+    """Point the CLI's opt-in log sink at this invocation's policy.
+
+    Importing this module configures nothing, so an embedder keeps full control
+    of logging policy and a normal run writes nothing to standard error.
+    ``--verbose`` opts the console command into this sink, which makes the
+    bounded ``_log_event`` records visible.
+
+    Verbosity is per invocation, never sticky. Both the stream and the logger
+    level are set from this invocation's ``enabled`` value, and the level is put
+    back when the run ends, so a default run after a verbose one emits nothing.
+    Attaching a handler is not enough to enable events: the logger gate decides
+    first, and ``NOTSET`` makes it inherit an ancestor's level. The sink is
+    still created at most once per process, attached to this module's logger
+    rather than the root logger, and never on the default path when none exists
+    yet, so an embedder who never opts in sees no handler appear.
+    """
+    sink = getattr(LOGGER, _LOG_SINK_ATTRIBUTE, None)
+    if not enabled and sink is None:
+        return
+    if sink is None:
+        sink = _LogSink(handler=_build_log_handler())
+        LOGGER.addHandler(sink.handler)
+        setattr(LOGGER, _LOG_SINK_ATTRIBUTE, sink)
+    sink.handler.setStream(console.file)
+    _set_log_sink_level(sink, enabled=enabled)
+
+
+def _build_log_handler() -> logging.StreamHandler:
+    """Create the sink handler; its stream and level are set per invocation."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(_BoundedEventFormatter())
+    handler.setLevel(_DISABLED_HANDLER_LEVEL)
+    return handler
+
+
+def _set_log_sink_level(sink: _LogSink, *, enabled: bool) -> None:
+    """Open the logger gate for a verbose run, and close it afterwards.
+
+    A verbose run needs the logger's own level, not only the handler's: a
+    ``NOTSET`` logger inherits an ancestor's threshold, and the logger gate
+    rejects the INFO record before any handler is consulted. The pre-run level
+    is remembered so the run restores an embedder's policy instead of imposing
+    the package default, and so repeated verbose runs stay idempotent.
+    """
+    if enabled:
+        if sink.restore_level is None:
+            sink.restore_level = LOGGER.level
+        LOGGER.setLevel(logging.INFO)
+        sink.handler.setLevel(logging.INFO)
+        return
+    if sink.restore_level is not None:
+        LOGGER.setLevel(sink.restore_level)
+        sink.restore_level = None
+    sink.handler.setLevel(_DISABLED_HANDLER_LEVEL)
 
 
 def extract_comments(input_docx: Path, output: Path | None = None) -> None:
@@ -400,54 +526,62 @@ def main(
     """
     command_started_at = clock()
     active_metrics = metrics or OperationMetrics()
-    app = _build_app(_production_dependencies(active_metrics, clock))
+    dependencies = _production_dependencies(active_metrics, clock)
+    app = _build_app(dependencies)
     try:
-        app(
-            tokens=tokens,
-            console=STDOUT_CONSOLE,
-            error_console=STDERR_CONSOLE,
-            exit_on_error=False,
-            print_error=False,
-        )
-    except UserFacingError as error:
-        _log_event(
-            active_metrics,
-            error.operation,
-            "failure",
-            {
-                "duration_ms": _duration_ms(command_started_at, clock=clock),
-                "error": type(error).__name__,
-                "error_category": "user_facing",
-            },
-        )
-        _print_error(str(error))
-        raise SystemExit(2) from error
-    except ExtractionError as error:
-        _log_event(
-            active_metrics,
-            "extraction",
-            "failure",
-            {
-                "duration_ms": _duration_ms(command_started_at, clock=clock),
-                "error": type(error).__name__,
-                "error_category": "extraction",
-            },
-        )
-        _print_error(str(error))
-        raise SystemExit(2) from error
-    except CycloptsError as error:
-        _log_event(
-            active_metrics,
-            "argument_parsing",
-            "failure",
-            {
-                "duration_ms": _duration_ms(command_started_at, clock=clock),
-                "error": type(error).__name__,
-                "error_category": "argument_parsing",
-            },
-        )
-        _print_error(str(error))
-        raise SystemExit(2) from error
+        try:
+            app(
+                tokens=tokens,
+                console=dependencies.stdout_console,
+                error_console=dependencies.stderr_console,
+                exit_on_error=False,
+                print_error=False,
+            )
+        except UserFacingError as error:
+            _log_event(
+                active_metrics,
+                error.operation,
+                "failure",
+                {
+                    "duration_ms": _duration_ms(command_started_at, clock=clock),
+                    "error": type(error).__name__,
+                    "error_category": "user_facing",
+                },
+            )
+            _print_error(str(error))
+            raise SystemExit(2) from error
+        except ExtractionError as error:
+            _log_event(
+                active_metrics,
+                "extraction",
+                "failure",
+                {
+                    "duration_ms": _duration_ms(command_started_at, clock=clock),
+                    "error": type(error).__name__,
+                    "error_category": "extraction",
+                },
+            )
+            _print_error(str(error))
+            raise SystemExit(2) from error
+        except CycloptsError as error:
+            _log_event(
+                active_metrics,
+                "argument_parsing",
+                "failure",
+                {
+                    "duration_ms": _duration_ms(command_started_at, clock=clock),
+                    "error": type(error).__name__,
+                    "error_category": "argument_parsing",
+                },
+            )
+            _print_error(str(error))
+            raise SystemExit(2) from error
+    finally:
+        # Verbosity is scoped to this invocation. The command opts in when
+        # ``--verbose`` is parsed; closing the gate here, after the
+        # terminal-failure handlers have logged, keeps a later call in the same
+        # process from inheriting an open logger gate or a stale stream.
+        _install_log_sink(enabled=False, console=dependencies.stderr_console)
 
 
 def _file_size(path: Path) -> int:
@@ -529,7 +663,7 @@ def _write_output_atomically(output: Path, markdown: str) -> None:
 
 def _print_error(message: str) -> None:
     """Render a user-facing error on standard error."""
-    STDERR_CONSOLE.print(
+    _stderr_console().print(
         Panel.fit(_safe_terminal_text(message), title="Error", border_style="red")
     )
 
@@ -540,20 +674,30 @@ def _print_success(output: Path, comment_count: int, warning_count: int) -> None
         f"Wrote Markdown to {output} "
         f"({comment_count} comments, {warning_count} warnings)."
     )
-    STDERR_CONSOLE.print(_safe_terminal_text(message), style="green")
+    _stderr_console().print(_safe_terminal_text(message), style="green")
 
 
 def _print_warning_summary(warnings: cabc.Sequence[object]) -> None:
     """Render the count of non-fatal extraction warnings."""
     count = len(warnings)
     label = "warning" if count == 1 else "warnings"
-    STDERR_CONSOLE.print(
+    _stderr_console().print(
         Panel.fit(
             f"Completed with {count} {label}.",
             title="Warnings",
             border_style="yellow",
         )
     )
+
+
+def _stderr_console() -> Console:
+    """Build a console over the current standard error stream.
+
+    The terminal-failure handlers run outside the command path, where no
+    runtime bundle is in scope, so they resolve the stream at call time. A
+    module-level console would pin the import-time stream instead.
+    """
+    return Console(file=sys.stderr, stderr=True)
 
 
 def _log_event(

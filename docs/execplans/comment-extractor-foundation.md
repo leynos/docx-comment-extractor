@@ -256,7 +256,7 @@ Add focused tests for:
 
 Delivered after the initial release, as a follow-up to the 2026-07-23 decision
 log entry. `tests/unit/test_renderer_properties.py` adds a bounded Hypothesis
-suite with two properties.
+suite with five properties.
 
 Reconstruction generates a `DocumentModel` by laying disjoint comment ranges
 over a stream of fragment slots and cutting that stream into blocks, so
@@ -267,11 +267,14 @@ one asserts that removing only the documented markers and comment bodies leaves
 the source text with heading prefixes and block joins in source order, and the
 other asserts that each range closes exactly once, after its matching start.
 
-Escaping is covered by three properties over `escape_criticmarkup_text`:
+Escaping is covered by four properties over `escape_criticmarkup_text`:
 arbitrary text containing every supported delimiter, Unicode, backslashes, raw
 HTML, and Markdown link syntax must leave no live construct unguarded;
-inverting the documented transformations must recover the original text; and
-text built only from non-escapable characters must be returned unchanged.
+inverting the documented transformations must recover the original text; text
+built only from non-escapable characters must be returned unchanged; and the
+number of `<` and `>` characters escaping consumes must equal the number of raw
+HTML tags matched in the input, counted from the input rather than searched in
+the output.
 
 `hypothesis` was added to the `dev` dependency group and `uv.lock` regenerated
 with `uv lock`, following the repository's dependency workflow.
@@ -624,11 +627,18 @@ quality gates.
   neutralization is checked as a soundness property that accepts a delimiter
   preceded by a source backslash as already guarded.
 
-  *Block parts are not a reliable structural probe.* An earlier draft asserted
-  that splitting the output on the blank-line join yields one part per block.
-  That fails when a fragment-free block contributes only a heading prefix, or
-  not even that, so it was dropped in favour of the text-preservation oracle,
-  which compares the whole document at once.
+  *Block parts are not a reliable structural probe on their own.* An earlier
+  draft asserted that splitting the output on the blank-line join yields one
+  part per block, as a standalone structural oracle. It was dropped in favour
+  of the text-preservation oracle, which compares the whole document at once. A
+  bounded form of the assertion survives inside that oracle, which still splits
+  the output on the blank-line join and asserts one part per block before
+  comparing the text. The generator still produces the fragment-free cases, with
+  and without a heading prefix (`_empty_block` draws either heading level 2 or
+  none). Both render as exactly one part, the prefix or the empty string,
+  because no block content contains a line break; `_expected_plain_text`
+  mirrors this by rebuilding a headingless fragment-free block as the empty
+  string.
 
   Both oracles were validated by exhaustive and randomized search before being
   committed: roughly 1.1 million exhaustive strings for escaping and 30,000

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
+import subprocess  # noqa: S404  # Needed to prove import-time side effects.
+import sys
 import types
 import typing as typ
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +19,33 @@ from rich.console import Console
 from docx_comment_extractor import cli
 from docx_comment_extractor.extractor import ExtractionError
 from tests.support_documents import build_fixture
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# A fresh interpreter reports what importing the CLI does to logging state and
+# to the terminal seams. Absolute values here are the pristine defaults, so any
+# handler, level, or pinned console the import adds shows up as a difference.
+_IMPORT_PROBE = """
+import json
+import logging
+
+root = logging.getLogger()
+before = {"handlers": len(root.handlers), "level": root.level}
+
+import docx_comment_extractor.cli as cli  # noqa: E402
+
+print(json.dumps({
+    "root_before": before,
+    "root_after": {"handlers": len(root.handlers), "level": root.level},
+    "cli_handlers": len(cli.LOGGER.handlers),
+    "cli_level": cli.LOGGER.level,
+    "module_consoles": [
+        name
+        for name in ("STDOUT_CONSOLE", "STDERR_CONSOLE")
+        if hasattr(cli, name)
+    ],
+}))
+"""
 
 
 @pytest.mark.parametrize("alias_kind", ["same", "symlink", "hard-link"])
@@ -187,6 +218,8 @@ def test_run_extraction_uses_the_injected_output_writer(
             input_validator=cli._validate_input_path,
             output_validator=cli._validate_output_path,
             stdout=lambda _markdown: None,
+            stdout_console=Console(file=StringIO()),
+            stderr_console=Console(file=StringIO(), stderr=True),
         ),
     )
 
@@ -215,6 +248,8 @@ def test_run_extraction_writes_stdout_through_the_injected_stream(
             input_validator=cli._validate_input_path,
             output_validator=cli._validate_output_path,
             stdout=written.append,
+            stdout_console=Console(file=StringIO()),
+            stderr_console=Console(file=StringIO(), stderr=True),
         ),
     )
 
@@ -364,6 +399,266 @@ def test_main_injects_one_runtime_bundle_into_the_command_path(
     }, "the injected clock should determine every recorded boundary duration"
     assert getattr(caplog.records[0], "duration_total_ms", None) == 250.0, (
         "the terminal event should be the second reading of the injected clock"
+    )
+
+
+def test_importing_the_cli_pins_no_streams_and_touches_no_logging_config() -> None:
+    """Import must not capture terminal streams or configure logging state."""
+    probe = subprocess.run(  # noqa: S603  # Fixed argv, module name is literal.
+        [sys.executable, "-c", _IMPORT_PROBE],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    observed = json.loads(probe.stdout)
+
+    assert observed["module_consoles"] == [], (
+        "no module-level console should capture the import-time streams"
+    )
+    assert observed["cli_handlers"] == 0, (
+        "importing the CLI should add no handler to the package logger"
+    )
+    assert observed["cli_level"] == logging.NOTSET, (
+        "the package logger should keep its level unset for embedders"
+    )
+    assert observed["root_after"] == observed["root_before"], (
+        "importing the CLI should not change root logger configuration"
+    )
+
+
+def test_main_writes_terminal_output_to_the_current_streams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal output must target the streams in place at call time."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    output_path = tmp_path / "output.md"
+    stdout_stream = StringIO()
+    stderr_stream = StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout_stream)
+    monkeypatch.setattr(sys, "stderr", stderr_stream)
+
+    with pytest.raises(SystemExit, match="0"):
+        cli.main(
+            [str(input_path), "--output", str(output_path)],
+            clock=lambda: 0.0,
+        )
+
+    assert "Wrote Markdown" in stderr_stream.getvalue(), (
+        "the success summary should reach the stream replacing sys.stderr"
+    )
+    assert output_path.exists(), (
+        "a run against replaced streams should still write its output file"
+    )
+
+
+def test_main_help_reaches_the_current_stdout_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cyclopts help must render into the stream in place at call time."""
+    stdout_stream = StringIO()
+    stderr_stream = StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout_stream)
+    monkeypatch.setattr(sys, "stderr", stderr_stream)
+
+    with pytest.raises(SystemExit, match="0"):
+        cli.main(["--help"], clock=lambda: 0.0)
+
+    assert "Usage" in stdout_stream.getvalue(), (
+        "help text should reach the stream replacing sys.stdout"
+    )
+
+
+def test_main_errors_reach_the_current_stderr_stream(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal failures must render into the stream in place at call time."""
+    stdout_stream = StringIO()
+    stderr_stream = StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout_stream)
+    monkeypatch.setattr(sys, "stderr", stderr_stream)
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main([str(tmp_path / "missing.docx")], clock=lambda: 0.0)
+
+    assert "does not exist" in stderr_stream.getvalue(), (
+        "user-facing errors should reach the stream replacing sys.stderr"
+    )
+
+
+@contextlib.contextmanager
+def _restored_cli_log_state() -> typ.Iterator[logging.Logger]:
+    """Yield the CLI logger and restore its handlers, level, and sink marker."""
+    cli_logger = cli.LOGGER
+    handlers_before = list(cli_logger.handlers)
+    level_before = cli_logger.level
+    sink_before = getattr(cli_logger, cli._LOG_SINK_ATTRIBUTE, None)
+    try:
+        yield cli_logger
+    finally:
+        for handler in list(cli_logger.handlers):
+            if handler not in handlers_before:
+                cli_logger.removeHandler(handler)
+        cli_logger.setLevel(level_before)
+        if sink_before is None:
+            with contextlib.suppress(AttributeError):
+                del cli_logger.__dict__[cli._LOG_SINK_ATTRIBUTE]
+        else:
+            cli_logger.__dict__[cli._LOG_SINK_ATTRIBUTE] = sink_before
+
+
+@contextlib.contextmanager
+def _capturing_streams() -> typ.Iterator[tuple[StringIO, StringIO]]:
+    """Yield replacement stdout/stderr streams and restore the originals."""
+    stdout_stream, stderr_stream = StringIO(), StringIO()
+    real_stdout, real_stderr = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = stdout_stream, stderr_stream
+    try:
+        yield stdout_stream, stderr_stream
+    finally:
+        sys.stdout, sys.stderr = real_stdout, real_stderr
+
+
+def test_main_installs_one_cli_log_handler_per_process(
+    tmp_path: Path,
+) -> None:
+    """A verbose run should install exactly one idempotent CLI-scoped sink."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    with _restored_cli_log_state() as cli_logger:
+        handlers_before = list(cli_logger.handlers)
+
+        with pytest.raises(SystemExit, match="0"):
+            cli.main([str(input_path), "--verbose"], clock=lambda: 0.0)
+        installed = [
+            handler for handler in cli_logger.handlers if handler not in handlers_before
+        ]
+        assert len(installed) == 1, (
+            "a verbose run should install exactly one CLI log handler"
+        )
+
+        with pytest.raises(SystemExit, match="0"):
+            cli.main([str(input_path), "--verbose"], clock=lambda: 0.0)
+
+        assert cli_logger.handlers == [*handlers_before, *installed], (
+            "a second verbose run should reuse the installed handler"
+        )
+
+
+def test_verbose_runs_emit_bounded_events_to_stderr(
+    tmp_path: Path,
+) -> None:
+    """The opt-in sink should expose bounded fields, never payloads."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    output_path = tmp_path / "output.md"
+    with (
+        _restored_cli_log_state(),
+        _capturing_streams() as (_stdout_stream, stderr_stream),
+        pytest.raises(SystemExit, match="0"),
+    ):
+        cli.main(
+            [str(input_path), "--output", str(output_path), "--verbose"],
+            clock=lambda: 0.0,
+        )
+
+    payload = stderr_stream.getvalue()
+    assert "CLI operation completed" in payload, (
+        "the opt-in sink should present the structured event message"
+    )
+    assert "operation=validation" in payload, (
+        "the opt-in sink should expose the bounded operation field"
+    )
+    assert "Wrote Markdown" in payload, (
+        "opt-in verbosity should not displace the user-facing summary"
+    )
+    for sensitive_value in (str(input_path), "commented text", "Sam C"):
+        assert sensitive_value not in payload, (
+            "opt-in events should not expose paths or document content"
+        )
+
+
+def test_verbosity_does_not_leak_into_the_next_invocation(
+    tmp_path: Path,
+) -> None:
+    """A default run after a verbose one must still keep stderr empty.
+
+    The sink must be inert again on the default path, and it must not keep
+    pointing at the previous run's stream. Checking the earlier stream for
+    late events is what makes this decisive: a merely detached handler would
+    otherwise leave the fresh stream empty and look like a pass.
+    """
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    with _restored_cli_log_state():
+        with (
+            _capturing_streams() as (_verbose_stdout, verbose_stderr),
+            pytest.raises(SystemExit, match="0"),
+        ):
+            cli.main([str(input_path), "--verbose"], clock=lambda: 0.0)
+        assert "operation=validation" in verbose_stderr.getvalue(), (
+            "the verbose run should have opened the sink"
+        )
+        events_after_verbose = verbose_stderr.getvalue().count(
+            "CLI operation completed"
+        )
+
+        with (
+            _capturing_streams() as (default_stdout, default_stderr),
+            pytest.raises(SystemExit, match="0"),
+        ):
+            cli.main([str(input_path)], clock=lambda: 0.0)
+
+    assert "{==commented text==}" in default_stdout.getvalue(), (
+        "the default run should still render Markdown to standard output"
+    )
+    assert default_stderr.getvalue() == "", (
+        "a later default run must not inherit the previous run's verbosity"
+    )
+    assert verbose_stderr.getvalue().count("CLI operation completed") == (
+        events_after_verbose
+    ), "the default run must not append events to the previous run's stream"
+
+
+def test_verbose_run_restores_the_logger_level_it_inherited(
+    tmp_path: Path,
+) -> None:
+    """The opt-in must widen, then restore, whatever level it found."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    with _restored_cli_log_state() as cli_logger:
+        cli_logger.setLevel(logging.ERROR)
+        with (
+            _capturing_streams(),
+            pytest.raises(SystemExit, match="0"),
+        ):
+            cli.main([str(input_path), "--verbose"], clock=lambda: 0.0)
+        assert cli_logger.level == logging.ERROR, (
+            "the run should restore the level it found, not the package default"
+        )
+
+
+def test_events_stay_inert_when_the_opt_in_sink_is_absent(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The default run should emit nothing at all to standard error."""
+    input_path = build_fixture("simple-comment", tmp_path / "input.docx")
+    with (
+        _capturing_streams() as (stdout_stream, stderr_stream),
+        caplog.at_level(logging.INFO, logger="docx_comment_extractor.cli"),
+        pytest.raises(SystemExit, match="0"),
+    ):
+        cli.main([str(input_path)], clock=lambda: 0.0)
+
+    assert "{==commented text==}" in stdout_stream.getvalue(), (
+        "the default run should still render Markdown to standard output"
+    )
+    assert [getattr(record, "operation", None) for record in caplog.records] == [
+        "validation",
+        "extraction",
+        "output_write",
+    ], "the default run should still emit its structured events"
+    assert stderr_stream.getvalue() == "", (
+        "the default run should leave standard error empty"
     )
 
 
@@ -558,7 +853,9 @@ def test_error_output_renders_untrusted_input_paths_as_safe_text(
 ) -> None:
     """Error output must display path text without Rich markup or control codes."""
     stream = StringIO()
-    monkeypatch.setattr(cli, "STDERR_CONSOLE", Console(file=stream, width=200))
+    monkeypatch.setattr(cli.sys, "stderr", stream)
+    # Pin the width so wrapping cannot split the untrusted text being asserted.
+    monkeypatch.setenv("COLUMNS", "200")
 
     cli._print_error(str(cli.UserFacingError.invalid_extension(Path(path_text))))
 
@@ -584,7 +881,9 @@ def test_success_output_renders_untrusted_output_paths_as_safe_text(
 ) -> None:
     """Success output must display output paths without Rich markup or controls."""
     stream = StringIO()
-    monkeypatch.setattr(cli, "STDERR_CONSOLE", Console(file=stream, width=200))
+    monkeypatch.setattr(cli.sys, "stderr", stream)
+    # Pin the width so wrapping cannot split the untrusted text being asserted.
+    monkeypatch.setenv("COLUMNS", "200")
 
     cli._print_success(Path(path_text), comment_count=1, warning_count=0)
 
@@ -605,7 +904,9 @@ def test_parser_error_output_renders_untrusted_text_as_safe_text(
     parser_message = (
         "[link=https://example.test]invalid[/link]\x1b]8;;https://example.test\x1b\\"
     )
-    monkeypatch.setattr(cli, "STDERR_CONSOLE", Console(file=stream, width=200))
+    monkeypatch.setattr(cli.sys, "stderr", stream)
+    # Pin the width so wrapping cannot split the untrusted text being asserted.
+    monkeypatch.setenv("COLUMNS", "200")
 
     cli._print_error(parser_message)
 

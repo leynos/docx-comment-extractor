@@ -29,6 +29,7 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from docx.document import Document as WordDocument
+    from docx.text.paragraph import Paragraph
 
 
 def test_extract_document_uses_injected_document_loader(tmp_path: Path) -> None:
@@ -299,11 +300,11 @@ def test_extract_paragraph_block_accumulates_many_end_markers() -> None:
         # The fixture requires an OOXML-only comment boundary marker.
         paragraph._p.append(marker)
 
-    block = _extract_paragraph_block(paragraph)
+    extraction = _extract_paragraph_block(paragraph)
 
-    assert block.fragments[0].end_comment_ids == tuple(map(str, range(128))), (
-        "the paragraph block should retain every end marker in document order"
-    )
+    assert extraction.block.fragments[0].end_comment_ids == tuple(
+        map(str, range(128))
+    ), "the paragraph block should retain every end marker in document order"
 
 
 @pytest.mark.parametrize("marker_name", ["commentRangeStart", "commentRangeEnd"])
@@ -358,6 +359,168 @@ def test_extract_document_supports_cross_paragraph_ranges(tmp_path: Path) -> Non
     assert result.document.comments[0].body == (
         "This crosses a paragraph boundary. / Second note paragraph."
     ), "the cross-paragraph comment body should retain both normalized paragraphs"
+
+
+def _relocate_marker(
+    source: Paragraph,
+    destination: Paragraph,
+    marker_name: str,
+    *,
+    index: int | None = None,
+) -> None:
+    """Move an OOXML comment boundary marker to a chosen child position.
+
+    ``python-docx`` always writes both markers beside the commented runs, so
+    the edge positions Word can itself produce only appear when a real marker
+    is moved by hand. ``index`` picks the destination child offset; ``None``
+    appends after the destination's last child.
+    """
+    marker = source._p.find(qn(f"w:{marker_name}"))
+    assert marker is not None, f"the source should contain a w:{marker_name} marker"
+    if index is None:
+        destination._p.append(marker)
+    else:
+        destination._p.insert(index, marker)
+
+
+def _assert_balanced_comment_markup(rendered: str, expected_count: int) -> None:
+    """Assert that comment highlights open, close, and cite equally often."""
+    counts = (
+        rendered.count("{=="),
+        rendered.count("==}"),
+        rendered.count("{>>"),
+    )
+    assert counts == (expected_count,) * 3, (
+        f"comment markup should balance at {expected_count}: {counts} in {rendered!r}"
+    )
+
+
+def test_extract_document_anchors_trailing_start_on_next_block(
+    tmp_path: Path,
+) -> None:
+    """A range start at a paragraph's end should anchor on the next block."""
+    document = Document()
+    first_paragraph = document.add_paragraph()
+    first_paragraph.add_run("Alpha ")
+    commented_run = first_paragraph.add_run("one")
+    second_paragraph = document.add_paragraph("two")
+    second_paragraph.add_run(" omega")
+    document.add_comment(commented_run, text="Boundary probe.", author="Probe")
+    # The start moves past the paragraph's final text while the end keeps a
+    # following text fragment, as Word writes for a range opened at an edge.
+    _relocate_marker(first_paragraph, first_paragraph, "commentRangeStart")
+    _relocate_marker(first_paragraph, second_paragraph, "commentRangeEnd", index=1)
+    document_path = tmp_path / "trailing-start.docx"
+    document.save(str(document_path))
+
+    result = extract_document(document_path)
+    rendered = render_document(result.document)
+
+    assert result.warnings == (), "an anchored boundary should not warn"
+    second_block = result.document.blocks[1]
+    assert second_block.fragments[0].start_comment_ids == ("0",), (
+        "the trailing start should anchor on the next block's first fragment"
+    )
+    assert second_block.fragments[0].end_comment_ids == ("0",), (
+        "the range end should keep closing on its own fragment"
+    )
+    _assert_balanced_comment_markup(rendered, 1)
+    assert "Boundary probe." in rendered, "the comment body should render"
+
+
+def test_extract_document_closes_leading_end_on_previous_block(
+    tmp_path: Path,
+) -> None:
+    """A range end before a block's first text should close the previous block."""
+    document = Document()
+    first_paragraph = document.add_paragraph()
+    first_paragraph.add_run("Alpha ")
+    commented_run = first_paragraph.add_run("one")
+    second_paragraph = document.add_paragraph("two omega")
+    document.add_comment(commented_run, text="Boundary probe.", author="Probe")
+    # The end moves ahead of the second paragraph's text, so no fragment of
+    # that paragraph can carry it; the previous block's text must close it.
+    _relocate_marker(first_paragraph, second_paragraph, "commentRangeEnd", index=0)
+    document_path = tmp_path / "leading-end.docx"
+    document.save(str(document_path))
+
+    result = extract_document(document_path)
+    rendered = render_document(result.document)
+
+    assert result.warnings == (), "an anchored boundary should not warn"
+    first_block = result.document.blocks[0]
+    assert first_block.fragments[1].start_comment_ids == ("0",), (
+        "the commented fragment should still open the range"
+    )
+    assert first_block.fragments[1].end_comment_ids == ("0",), (
+        "the leading end should close on the previous block's last fragment"
+    )
+    _assert_balanced_comment_markup(rendered, 1)
+    assert "Boundary probe." in rendered, "the comment body should render"
+
+
+def test_extract_document_skips_empty_blocks_when_closing_leading_end(
+    tmp_path: Path,
+) -> None:
+    """A leading end should close the nearest block that actually has text."""
+    document = Document()
+    first_paragraph = document.add_paragraph()
+    first_paragraph.add_run("Alpha ")
+    commented_run = first_paragraph.add_run("one")
+    document.add_paragraph()
+    third_paragraph = document.add_paragraph("three")
+    document.add_comment(commented_run, text="Gap probe.", author="Probe")
+    # An empty paragraph between the range's ends has no fragment to carry the
+    # boundary, so the closing marker must reach past it to the commented text.
+    _relocate_marker(first_paragraph, third_paragraph, "commentRangeEnd", index=0)
+    document_path = tmp_path / "gap-end.docx"
+    document.save(str(document_path))
+
+    result = extract_document(document_path)
+    rendered = render_document(result.document)
+
+    assert result.warnings == (), "the boundary should still find a text fragment"
+    assert result.document.blocks[1].fragments == (), (
+        "the intervening paragraph should stay empty"
+    )
+    _assert_balanced_comment_markup(rendered, 1)
+    assert "Gap probe." in rendered, "the comment body should render"
+
+
+@pytest.mark.parametrize(
+    ("marker_name", "index"),
+    [
+        ("commentRangeStart", None),
+        ("commentRangeEnd", 0),
+    ],
+)
+def test_extract_document_warns_for_unattachable_comment_markers(
+    tmp_path: Path,
+    marker_name: str,
+    index: int | None,
+) -> None:
+    """Boundaries with no adjacent text should warn instead of vanishing."""
+    document = Document()
+    paragraph = document.add_paragraph("Alpha one")
+    marker = OxmlElement(f"w:{marker_name}")
+    marker.set(qn("w:id"), "0")
+    if index is None:
+        paragraph._p.append(marker)
+    else:
+        paragraph._p.insert(index, marker)
+    document_path = tmp_path / f"unattached-{marker_name}.docx"
+    document.save(str(document_path))
+
+    result = extract_document(document_path)
+    rendered = render_document(result.document)
+
+    assert [warning.code for warning in result.warnings] == [
+        "unattached-comment-marker"
+    ], "an unattachable boundary should surface one stable warning code"
+    assert "comment 0" in result.warnings[0].message, (
+        "the warning should name the comment whose boundary could not attach"
+    )
+    _assert_balanced_comment_markup(rendered, 0)
 
 
 def test_extract_document_warns_for_tables(tmp_path: Path) -> None:

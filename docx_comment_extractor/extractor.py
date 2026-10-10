@@ -205,11 +205,19 @@ def _extract_blocks(
     """Extract supported top-level blocks and unsupported-block warnings."""
     blocks: list[Block] = []
     warnings: list[ExtractionWarning] = []
+    pending_start_ids: tuple[str, ...] = ()
 
     for item in document.iter_inner_content():
         match item:
             case Paragraph():
-                blocks.append(_extract_paragraph_block(item))
+                extraction = _extract_paragraph_block(item, pending_start_ids)
+                pending_start_ids = extraction.trailing_start_ids
+                # Leading ends close the previous block, so they must be
+                # anchored before this paragraph's own block is appended.
+                warnings.extend(
+                    _attach_leading_ends(blocks, extraction.leading_end_ids)
+                )
+                blocks.append(extraction.block)
             case Table():
                 warnings.append(
                     ExtractionWarning(
@@ -218,34 +226,81 @@ def _extract_blocks(
                     )
                 )
 
+    # A start with no following text anywhere cannot open a range, so it is
+    # reported rather than silently dropped.
+    warnings.extend(
+        _unattached_marker_warning("commentRangeStart", comment_id)
+        for comment_id in pending_start_ids
+    )
     return blocks, warnings
 
 
-def _extract_paragraph_block(paragraph: Paragraph) -> Block:
-    """Convert a Word paragraph and its comment boundaries into a block."""
+@dc.dataclass(frozen=True, slots=True)
+class _ParagraphExtraction:
+    """A paragraph's block plus comment boundaries its own text cannot hold.
+
+    Attributes
+    ----------
+    block
+        The paragraph converted to rendering fragments.
+    trailing_start_ids
+        Range starts left at the paragraph's end. A later block's first text
+        fragment anchors them so a range can open across a paragraph break.
+    leading_end_ids
+        Range ends seen before the paragraph's first text. They close the
+        nearest preceding text fragment so a range can end across a break.
+
+    """
+
+    block: Block
+    trailing_start_ids: tuple[str, ...] = ()
+    leading_end_ids: tuple[str, ...] = ()
+
+
+def _extract_paragraph_block(
+    paragraph: Paragraph,
+    pending_start_ids: tuple[str, ...] = (),
+) -> _ParagraphExtraction:
+    """Convert a Word paragraph into a block and its outside-range boundaries."""
     fragments: list[Fragment] = []
     fragment_end_ids: list[list[str]] = []
-    pending_start_ids: list[str] = []
+    leading_end_ids: list[str] = []
+    pending_ids = list(pending_start_ids)
 
     for child in _iter_paragraph_xml_children(paragraph):
         match _local_name(child):
             case "commentRangeStart":
-                pending_start_ids.append(_comment_id(child))
+                pending_ids.append(_comment_id(child))
             case "commentRangeEnd":
                 if fragment_end_ids:
                     fragment_end_ids[-1].append(_comment_id(child))
+                else:
+                    leading_end_ids.append(_comment_id(child))
             case _:
                 text = _extract_inline_text(child)
                 if text:
                     fragments.append(
                         Fragment(
                             text=text,
-                            start_comment_ids=tuple(pending_start_ids),
+                            start_comment_ids=tuple(pending_ids),
                         )
                     )
                     fragment_end_ids.append([])
-                    pending_start_ids.clear()
+                    pending_ids.clear()
 
+    return _ParagraphExtraction(
+        block=_build_paragraph_block(paragraph, fragments, fragment_end_ids),
+        trailing_start_ids=tuple(pending_ids),
+        leading_end_ids=tuple(leading_end_ids),
+    )
+
+
+def _build_paragraph_block(
+    paragraph: Paragraph,
+    fragments: list[Fragment],
+    fragment_end_ids: list[list[str]],
+) -> Block:
+    """Assemble a paragraph block, closing fragments with their end markers."""
     style_name = paragraph.style.name if paragraph.style is not None else ""
     heading_level = _heading_level_for_word_style(style_name)
     kind = "heading" if heading_level is not None else "paragraph"
@@ -259,6 +314,55 @@ def _extract_paragraph_block(paragraph: Paragraph) -> Block:
         ),
         heading_level=heading_level,
     )
+
+
+def _attach_leading_ends(
+    blocks: list[Block],
+    comment_ids: tuple[str, ...],
+) -> list[ExtractionWarning]:
+    """Close leading range ends on the nearest preceding block that has text."""
+    # Attachment mutates ``blocks``, so run it as its own pass: a boundary is
+    # only unattachable once every earlier block has been offered it.
+    unattached_ids = [
+        comment_id
+        for comment_id in comment_ids
+        if not _close_on_previous_block(blocks, comment_id)
+    ]
+    return [
+        _unattached_marker_warning("commentRangeEnd", comment_id)
+        for comment_id in unattached_ids
+    ]
+
+
+def _close_on_previous_block(blocks: list[Block], comment_id: str) -> bool:
+    """Attach a range end to the last text fragment of an earlier block."""
+    for index in range(len(blocks) - 1, -1, -1):
+        block = blocks[index]
+        if not block.fragments:
+            continue
+        last = block.fragments[-1]
+        closed_last = dc.replace(
+            last,
+            end_comment_ids=(*last.end_comment_ids, comment_id),
+        )
+        blocks[index] = dc.replace(
+            block,
+            fragments=(*block.fragments[:-1], closed_last),
+        )
+        return True
+    return False
+
+
+def _unattached_marker_warning(
+    marker_name: str,
+    comment_id: str,
+) -> ExtractionWarning:
+    """Warn when a comment boundary has no adjacent text to anchor on."""
+    message = (
+        f"Ignoring a {marker_name} for comment {comment_id}: "
+        "no adjacent text exists to anchor the boundary."
+    )
+    return ExtractionWarning(code="unattached-comment-marker", message=message)
 
 
 def _iter_paragraph_xml_children(paragraph: Paragraph) -> typ.Iterator[XmlElement]:
