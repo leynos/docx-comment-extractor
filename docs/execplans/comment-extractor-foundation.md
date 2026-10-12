@@ -468,6 +468,20 @@ repository quality gates.
   the design document, developers' guide, users' guide, and this plan now
   qualify their soundness and exactness claims and record the guard's visible
   cost. Detail in the Decision Log.
+- [x] 2026-10-12: Corrected the three documentation discrepancies the
+  generation-3 re-assessment named, after verifying each against the parser
+  rather than editing from the review prose. The design document had described
+  `10. item\n    <script` as a list item holding indented code; a parser returns
+  `list_item_open`, `paragraph_open`, then `html_block`, so the shape is a
+  real block and the guard's blindness to it is the point. The users' guide and
+  the design document had presented `&amp;lt;script` and `&lt;script` as what
+  the reader sees; those are the serialized forms, and the reader sees
+  `&lt;script` where the unguarded renderer displayed `<script`. The oracle
+  docstring cited an over-approximation control that did not exist and used a
+  shape that agrees with the parser; both are fixed, and the control now
+  asserts parser-inert and oracle-live together. Removing the continuation rule
+  from the oracle makes all four pinned cases report inert, so the control is
+  not vacuous. All gates green at `beab33e`: 635 tests, 6 snapshots.
 - [x] 2026-10-11: Fixed a renderer defect found while building the new oracle.
   A block beginning with an unclosed HTML-block opener such as a bare `<!--`
   rendered as a CommonMark `html_block` that runs to the next blank line,
