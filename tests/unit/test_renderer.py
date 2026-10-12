@@ -135,6 +135,44 @@ def test_render_document_neutralizes_html_and_unsafe_links() -> None:
     )
 
 
+def test_render_extracted_carriage_return_opener_is_inert(
+    tmp_path: Path,
+) -> None:
+    """A carriage return from a real DOCX should not leave an opener live.
+
+    This is the end-to-end form of the CR calibration: the CR arrives as a
+    numeric character reference in ``w:t``, which is the only serialized shape
+    that survives XML parsing as a carriage return. The guard that anchored with
+    ``(?m:^)`` treated the opener after it as inert, and CommonMark then opened
+    an HTML block that ran to the next blank line -- over the renderer's own
+    CriticMarkup markers.
+    """
+    from markdown_it import MarkdownIt
+
+    document_path = build_fixture("carriage-return", tmp_path / "cr.docx")
+
+    result = extract_document(document_path)
+    extracted = "".join(
+        fragment.text
+        for block in result.document.blocks
+        for fragment in block.fragments
+    )
+    assert "safe\r<!--" in extracted, (
+        f"the fixture should deliver a real carriage return, not {extracted!r}"
+    )
+
+    rendered = render_document(result.document)
+    markdown = MarkdownIt("commonmark")
+    stack = list(markdown.parse(rendered))
+    blocks = []
+    while stack:
+        token = stack.pop()
+        if token.type in {"html_block", "html_inline"}:
+            blocks.append(token.content)
+        stack.extend(token.children or [])
+    assert not blocks, f"a carriage-return opener stayed live in {rendered!r}"
+
+
 def test_render_document_snapshot_for_cross_paragraph_comment(
     tmp_path: Path,
     snapshot: SnapshotAssertion,

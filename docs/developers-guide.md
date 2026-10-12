@@ -176,12 +176,15 @@ silently skip out of a passing run.
 `tests/unit/test_renderer_oracle_sensitivity.py` mutates the renderer with
 `monkeypatch`, one behaviour at a time, and shows the oracle rejects the
 result. It covers per-fragment escaping, grouping that ignores comment
-boundaries, a removed backslash-doubling rule, the pre-repair HTML-block guard
-that missed indented and case-insensitive openers, live markup in a comment
-reference, and a highlight displaced onto the wrong span. Control cases confirm
-the unmutated renderer is accepted and that the reference and extent oracles
-accept correct output, so a rejection cannot be explained by an oracle that
-rejects everything.
+boundaries, a removed backslash-doubling rule, two generations of pre-repair
+HTML-block guard, live markup in a comment reference, and a highlight displaced
+onto the wrong span. The first guard acted only at string position zero and
+matched block tag names case-sensitively; the second applied at every line but
+anchored with a bare multiline `^`, which Python matches after a line feed and
+nowhere else, and folded away indentation but not blockquote or list markers.
+Control cases confirm the unmutated renderer is accepted and that the reference
+and extent oracles accept correct output, so a rejection cannot be explained by
+an oracle that rejects everything.
 
 Limits of the coverage. The round-trip oracle uses an alphabet without
 backslashes, because `strip_documented_escapes` inverts the bracket rule by
@@ -204,9 +207,13 @@ composition property checks safety under a committed CriticMarkup reader model
 — an anchored left-to-right consumer that takes each `{==…==}{>>…<<}` pair as
 one span, with CriticMarkup processing before Markdown parsing — rather than
 under a verified downstream pipeline; no CriticMarkup renderer is in the
-dependency set. A bare carriage return is also out of scope, because the
-extractor emits `"\n"` for both break elements and XML parsing normalizes a
-literal CR in character data. The accounting property
+dependency set. The generator's alphabet draws no carriage return, because the
+extractor emits `"\n"` for both break elements, but the shape is reachable
+rather than out of scope: a numeric character reference such as `&#13;`
+survives XML parsing as a real CR even though a literal CR in character data is
+normalized to a line feed, and CommonMark treats the result as a line ending.
+It is covered by pinned examples, by the calibration corpus, and by a
+serialized fixture. The accounting property
 (`test_escape_consumes_exactly_the_raw_html_tags_it_matches`) establishes
 intact-tag removal and aggregate bracket counts, not exact transformed
 positions; the per-construct check carries consumer safety.

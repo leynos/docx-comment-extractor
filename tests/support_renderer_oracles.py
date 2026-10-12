@@ -69,13 +69,46 @@ _LIVE_LINE_START = (
     r"|<![A-Z]"
     r"|<!\[CDATA\["
 )
-# An HTML block may be indented by up to three spaces, and it may begin at the
-# start of any line rather than only at the start of the text. Both bounds were
-# missed by an earlier form of this pattern, which accepted an indented or
-# uppercase opener as inert when a real reader sees a block.
+# The prefix a reader may fold away before an HTML-block opener: up to three
+# spaces of indentation, then any run of blockquote and list markers. Three
+# facts bound the shape, and all three were established against a CommonMark
+# parser over the corpus in ``test_renderer_oracle_fidelity`` rather than from
+# memory.
+#
+# First, a marker may itself be indented by up to three spaces. Second, a
+# blockquote marker may be followed by up to four whitespace characters and
+# needs none at all -- ``><script`` opens a block inside a quote. Third, a list
+# marker needs one to four, because the marker must be separated from its
+# content.
+#
+# Omitting container markers entirely was an earlier defect in this oracle: a
+# blockquote or list item wrapping an opener is promoted to a block inside the
+# container, and the reader sees the same block an unindented opener produces.
+#
+# One over-approximation is known and deliberate. A list marker's separator is
+# bounded by four *columns*, and a tab is not one column but however many
+# advance it to the next four-column stop. A character-count pattern cannot
+# compute that, so a tab-heavy prefix such as ``-\\t\\t`` is reported live where
+# the reader sees indented code. The pattern stays sound -- it never misses a
+# block the reader opens -- and it is exact on text without tabs, which is the
+# domain the composition alphabet draws from.
+_LIVE_BLOCK_PREFIX = (
+    r" {0,3}"
+    # Plain single braces: this fragment interpolates nothing, and the doubling
+    # an f-string would need here is exactly the kind of hand-counted escaping
+    # the surrounding comments are warning about.
+    r"(?:(?:>[ \t]{0,4}|[-+*][ \t]{1,4}|[0-9]{1,9}[.)][ \t]{1,4}))*"
+)
+# An HTML block may be indented by up to three spaces, it may begin at the
+# start of any line rather than only at the start of the text, and a line ends
+# at a carriage return as well as a line feed. All three bounds were missed by
+# an earlier form of this pattern, which accepted an indented, uppercase,
+# carriage-return-terminated, or container-wrapped opener as inert when a real
+# reader sees a block. Python's ``(?m:^)`` recognizes only the line feed, so the
+# anchor is spelled out here.
 LIVE_RAW_HTML = re.compile(
     # A line-start opener, with or without a closing '>'.
-    rf"(?m:^ {{0,3}}(?:{_LIVE_LINE_START}))"
+    rf"(?:(?<=\n)|(?<=\r)|\A){_LIVE_BLOCK_PREFIX}(?:{_LIVE_LINE_START})"
     # A complete tag anywhere, which also ends any block the first rule found.
     rf"|{_LIVE_TAG}"
     rf"|<\?[\s\S]*?\?>"
@@ -90,9 +123,13 @@ LIVE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;)")
 # renderer's pattern, so dropping an opener from the implementation fails the
 # accounting property instead of redefining what the property counts.
 #
-# Every line is a candidate, with up to three spaces of indentation, matching
-# the start condition a CommonMark reader applies.
-LIVE_BLOCK_OPENER = re.compile(rf"(?m:^ {{0,3}}(?=(?:{_LIVE_LINE_START}))<)")
+# Every line is a candidate, and the prefix is the same one ``LIVE_RAW_HTML``
+# folds away: a reader reaches the opener through the container markers just as
+# it does through indentation. Python's ``(?m:^)`` recognizes only the line
+# feed, so the anchor is spelled out as it is above.
+LIVE_BLOCK_OPENER = re.compile(
+    rf"(?:(?<=\n)|(?<=\r)|\A){_LIVE_BLOCK_PREFIX}(?=(?:{_LIVE_LINE_START}))<"
+)
 
 
 def guarded_opener_count(text: str) -> int:
@@ -339,4 +376,41 @@ def apply_leading_only_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(
         renderer, "_neutralize_html_block_openers", leading_only_html_block_opener
+    )
+
+
+# The guard's start condition as it stood before the line-ending and container
+# repair: anchored with ``(?m:^)`` and permitting only `` {0,3}`` of indent. Two
+# shapes were live as a result. Python's multiline ``^`` matches after a line
+# feed and nowhere else, so an opener after a carriage return slipped past; and
+# a blockquote or list marker before the opener was not folded away, so the
+# opener started a block inside the container with nothing neutralizing it.
+#
+# This is the defect the shared oracle once shared, which is why the oracle had
+# to be repaired in the same change. Reproducing the old shape here keeps the
+# oracle's sensitivity to it committed rather than reported.
+_PRE_REPAIR_OPENER = (
+    r"(?:"
+    r"<!--"
+    r"|<\?"
+    r"|<!(?:[A-Z]|\\\[|\[CDATA\[)"
+    rf"|(?i:</?(?:{_HTML_BLOCK_NAMES})(?=\s|/?>|$))"
+    r")"
+)
+LF_ONLY_INDENT_GUARD = re.compile(
+    rf"(?m:^(?P<prefix> {{0,3}})(?={_PRE_REPAIR_OPENER})(?P<bracket><))"
+)
+
+
+def lf_only_indent_html_block_opener(text: str) -> str:
+    """Entity-escape an opener only after a line feed, ignoring containers."""
+    return LF_ONLY_INDENT_GUARD.sub(r"\g<prefix>&lt;", text)
+
+
+def apply_lf_only_indent_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the pre-repair guard: LF-only anchor, spaces-only indent."""
+    from docx_comment_extractor import renderer
+
+    monkeypatch.setattr(
+        renderer, "_neutralize_html_block_openers", lf_only_indent_html_block_opener
     )

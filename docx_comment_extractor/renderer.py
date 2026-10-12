@@ -47,20 +47,44 @@ RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
 # every later block. The same prefixes mid-line are inert, and escaping them
 # anyway would be a visible change to text no reader would treat as markup.
 #
-# Two properties of the start condition decide the shape of this pattern. It
-# applies at the start of *every* line, not merely at the start of the text, and
-# permits up to three leading spaces; a Word line break arrives as ``"\n"`` and
-# leaves a real line start behind, and Word will not have stripped the
-# indentation. The block tag names are matched case-insensitively, as the
-# specification requires, while a declaration (``<!`` plus a letter) keeps the
-# uppercase-only spelling the specification gives it.
+# Four properties of the start condition decide the shape of this pattern.
+#
+# It applies at the start of *every* line, not merely at the start of the text,
+# and a line ends at a carriage return just as it does at a line feed. A Word
+# ``w:br`` or ``w:cr`` arrives as ``"\n"``, but a numeric character reference
+# such as ``&#13;`` survives XML parsing as a real CR, so both endings are
+# reachable. Python's ``(?m:^)`` recognizes only the line feed, which is why the
+# anchor is spelled out here rather than written as a flag.
+#
+# It permits up to three leading spaces -- Word will not have stripped the
+# indentation -- and it also folds away any blockquote and list container
+# prefix, because an opener inside one is promoted to a block *within* the
+# container just as indentation promotes it at the top level. Failing to consider
+# containers left an opener live inside a list item or blockquote, where the
+# resulting block swallowed the renderer's own CriticMarkup markers.
+#
+# The prefix admits a tab wherever the specification lets one satisfy a
+# required column: a blockquote marker folds up to four whitespace characters
+# and needs none at all, while a list marker takes one to four. That is a column
+# bound rather than a character bound, so a tab-heavy prefix such as ``-\t\t``
+# is matched even where a reader sees indented code. The over-approximation is
+# deliberate: the escape it produces is invisible in prose, the visible cost
+# inside a code block is pre-existing because a complete tag is already
+# entity-escaped, and the alternative is a guard that misses reachable blocks.
+#
+# The block tag names are matched case-insensitively, as the specification
+# requires, while a declaration (``<!`` plus a letter) keeps the uppercase-only
+# spelling the specification gives it.
 #
 # Only the leading bracket is consumed: the lookahead asserts which opener
 # follows, and the named group then captures the ``<`` that the substitution
-# replaces with an entity. The indentation and the rest of the opener are
+# replaces with an entity. The container prefix and the rest of the opener are
 # preserved so the rendered text still reads as the source did.
 HTML_BLOCK_OPENER = re.compile(
-    r"(?m:^(?P<indent> {0,3})(?="
+    r"(?:(?<=\n)|(?<=\r)|\A)"
+    r"(?P<prefix> {0,3}"
+    r"(?:>[ \t]{0,4}|[-+*][ \t]{1,4}|[0-9]{1,9}[.)][ \t]{1,4})*)"
+    r"(?="
     r"<!--"
     r"|<\?"
     # A declaration needs an uppercase letter. The bracket rule may already have
@@ -75,7 +99,7 @@ HTML_BLOCK_OPENER = re.compile(
     # A tag name ends at whitespace, a tag terminator, or the end of the line.
     # ``<script&gt;`` is not an opener, because the entity continues the name.
     r"(?=\s|/?>|$))"
-    r")(?P<bracket><))"
+    r")(?P<bracket><)"
 )
 
 
@@ -91,7 +115,7 @@ def _neutralize_html_block_openers(text: str) -> str:
     characters escaping consumes are the brackets of the tags it matched, plus
     one bracket per opener guarded here.
     """
-    return HTML_BLOCK_OPENER.sub(r"\g<indent>&lt;", text)
+    return HTML_BLOCK_OPENER.sub(r"\g<prefix>&lt;", text)
 
 
 def render_document(document: DocumentModel) -> str:

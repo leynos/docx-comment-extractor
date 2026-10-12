@@ -69,11 +69,67 @@ CALIBRATION_CASES: tuple[tuple[str, bool], ...] = (
     ("<script\n{==x==}{>>note<<}", True),
     (" <script\n{==x==}{>>note<<}", True),
     ("safe\n <script\n{==x==}{>>@a0@<<}", True),
+    # A line ends at a carriage return as well as at a line feed, and CommonMark
+    # ends one at a bare CR. The extractor renders a ``w:br`` or ``w:cr`` as
+    # ``"\n"``, but a numeric character reference reaches the renderer as a real
+    # CR, so this shape is reachable and an LF-only anchor misses it.
+    ("\r<script", True),
+    ("\r\n<script", True),
+    ("safe\r<script", True),
+    ("safe\r\n<script", True),
+    ("safe\r<!--", True),
+    ("safe\r\n<!--", True),
+    ("safe\r<div", True),
+    ("safe\r\n<DIV", True),
+    ("safe\r<script\n{==x==}{>>note<<}", True),
+    # An opener inside a blockquote or list item is promoted to an HTML block
+    # within the container, so the container prefix must be folded away too. A
+    # marker may carry up to three spaces of its own indentation; a blockquote
+    # marker may swallow up to four whitespace characters and needs none; a list
+    # marker needs one to four to separate itself from its content.
+    ("> <script", True),
+    ("> <SCRIPT", True),
+    ("> <H1", True),
+    ("> <!--", True),
+    ("> <div", True),
+    ("  > <script", True),
+    ("   > <script", True),
+    (">\t<script", True),
+    (">  <script", True),
+    (">    <script", True),
+    (">> <script", True),
+    ("- <script", True),
+    ("- <!--", True),
+    ("* <div", True),
+    ("+ <pre", True),
+    ("1. <script", True),
+    ("1) <!--", True),
+    (" - <script", True),
+    ("  - <script", True),
+    ("   - <script", True),
+    ("-   <script", True),
+    ("1.\t<script", True),
+    ("> - <script", True),
+    ("- > <script", True),
+    ("> - > <script", True),
+    ("> <script\n{==x==}{>>note<<}", True),
+    ("- safe\n- <!--", True),
     # Near-misses that must not match.
     # Four spaces is indented code, not an HTML block; a tab is not a space.
     ("    <script", False),
     ("\t<script", False),
     ("safe\n    <script", False),
+    ("\r    <script", False),
+    ("\r\t<script", False),
+    ("safe\r    <script", False),
+    # A tab in the indent position is four columns, so these are indented code
+    # rather than a container holding an opener.
+    ("    > <script", False),
+    ("\t> <script", False),
+    ("safe\n    > <script", False),
+    # A blockquote marker folds at most four whitespace characters, so a fifth
+    # is content indentation -- four columns of it -- and makes indented code.
+    (">     <script", False),
     # A declaration still needs its uppercase letter.
     (" <!x", False),
     ("safe\n <!", False),
@@ -160,23 +216,69 @@ def test_oracle_rejects_every_escaping_residue() -> None:
 # output rather than on escape-string equality, because equality to a wrong
 # expectation passed while a real reader still opened a block.
 PINNED_LINE_START_OPENERS: tuple[str, ...] = (
+    # Indentation.
     " <script",
     "  <script",
     "   <script",
+    # Case.
     "<SCRIPT",
     "<Script",
     " <DIV",
     "</DIV",
     "<H1",
+    # A line feed.
     "safe\n<script",
     "safe\n <script",
     "safe\n   <script",
     "safe\n<!--",
     "safe\n<!--x",
     "safe\n<DIV",
+    # A carriage return, which ends a line for CommonMark just as a line feed
+    # does. The extractor emits "\n" for a Word break, but a numeric character
+    # reference survives XML parsing as a real CR, so this is reachable.
+    "\r<script",
+    "\r\n<script",
+    "safe\r<script",
+    "safe\r\n<script",
+    "safe\r<!--",
+    "safe\r\n<!--",
+    "safe\r<div",
+    "safe\r\n<DIV",
+    # A container prefix, which promotes the opener to a block inside the
+    # container just as indentation does.
+    "> <script",
+    "> <SCRIPT",
+    "> <H1",
+    "> <!--",
+    "> <div",
+    ">\t<script",
+    ">  <script",
+    ">    <script",
+    ">> <script",
+    "  > <script",
+    "   > <script",
+    "- <script",
+    "- <!--",
+    "* <div",
+    "+ <pre",
+    "1. <script",
+    "1) <!--",
+    "1.\t<script",
+    " - <script",
+    "  - <script",
+    "   - <script",
+    "-   <script",
+    "> - <script",
+    "- > <script",
+    "> - > <script",
+    # The shapes that do the damage: an opener followed by the renderer's own
+    # markers, which is what an unclosed block would swallow.
     "<script\n{==x==}{>>note<<}",
     " <script\n{==x==}{>>note<<}",
     "safe\n <script\n{==x==}{>>@a0@<<}",
+    "> <script\n{==x==}{>>note<<}",
+    "safe\r<script\n{==x==}{>>note<<}",
+    "- safe\n- <!--",
 )
 
 
@@ -190,6 +292,10 @@ def test_escaping_neutralizes_indented_and_case_insensitive_openers(
     spaces, and its block tag names are case-insensitive. Refusing to
     neutralize any of those shapes leaves a live ``html_block`` that runs to the
     next blank line, which is where the renderer's own CriticMarkup markers sit.
+
+    A line also ends at a carriage return, and a blockquote or list container
+    reaches the opener through its markers rather than through indentation.
+    Both were missed by the guard this test replaced.
     """
     from docx_comment_extractor.renderer import escape_criticmarkup_text
 
@@ -216,13 +322,64 @@ PINNED_SPLIT_OPENERS: tuple[tuple[str, ...], ...] = (
 def test_escaping_neutralizes_openers_reassembled_across_runs(
     fragments: tuple[str, ...],
 ) -> None:
-    """An opener split across Word runs should be neutralized once rejoined."""
+    """An opener split across Word runs should be neutralized once rejoined.
+
+    This calls the escape function on the joined pair directly, so it tests the
+    escape rule rather than the renderer's fragment grouping. The grouping is
+    covered separately by
+    ``test_render_document_neutralizes_openers_split_across_runs`` below; this
+    test would keep passing if the renderer handed the escape function one
+    fragment at a time.
+    """
     from docx_comment_extractor.renderer import escape_criticmarkup_text
 
     markdown = MarkdownIt("commonmark")
     escaped = escape_criticmarkup_text("".join(fragments))
     assert not _live_html_tokens(markdown, escaped), (
         f"{fragments!r} reassembled to live markup {escaped!r}"
+    )
+
+
+# The same reassembly driven through the public renderer, so the fragment
+# grouping is exercised rather than assumed. ``render_document`` escapes a run
+# of contiguous fragments in one buffer, which is what makes a construct
+# spanning a Word run boundary visible to the guard. Each pair here is split
+# *inside* the prefix rather than inside the opener, so the escape function
+# never sees the assembled form unless the grouping actually happened.
+PINNED_SPLIT_PREFIXES: tuple[tuple[str, ...], ...] = (
+    (">", " <script"),
+    ("> ", "<script"),
+    ("-", " <script"),
+    ("1.", " <script"),
+    ("safe\n>", " <script"),
+    ("safe\r", "<script"),
+    ("   >", " <script"),
+    ("> -", " > <script"),
+)
+
+
+@pytest.mark.parametrize(("fragments"), PINNED_SPLIT_PREFIXES)
+def test_render_document_neutralizes_openers_split_across_runs(
+    fragments: tuple[str, ...],
+) -> None:
+    """The renderer should neutralize an opener split across Word runs.
+
+    A Word paragraph can split a single visual line across several runs at any
+    point, including inside a blockquote or list marker. The guard only sees
+    the opener once the renderer has joined the run of contiguous fragments, so
+    this is the grouping contract rather than the escape rule.
+    """
+    from docx_comment_extractor.models import Block, DocumentModel, Fragment
+    from docx_comment_extractor.renderer import render_document
+
+    markdown = MarkdownIt("commonmark")
+    document = DocumentModel(
+        blocks=(Block("paragraph", tuple(Fragment(text) for text in fragments)),),
+        comments=(),
+    )
+    rendered = render_document(document)
+    assert not _live_html_tokens(markdown, rendered), (
+        f"{fragments!r} rendered to live markup {rendered!r}"
     )
 
 
@@ -234,6 +391,29 @@ def test_oracle_guards_every_opener_escaping_neutralizes() -> None:
     oracle to keep the two from drifting back into agreement on a defect.
     """
     for text in PINNED_LINE_START_OPENERS:
+        assert LIVE_RAW_HTML.search(text) is not None, (
+            f"the oracle treats the live opener {text!r} as inert"
+        )
+
+
+def test_oracle_shares_the_line_start_condition_it_claims_to_judge() -> None:
+    """The oracle's line-start anchor must not be a bare ``(?m:^)``.
+
+    Python's multiline ``^`` matches after a line feed and nowhere else, so an
+    anchor written that way classifies a carriage-return-terminated line and a
+    container-prefixed opener as inert. The renderer properties would then pass
+    over live markup. This asserts the anchor sees all three line endings and a
+    folded container prefix, rather than only the shape the oracle's own corpus
+    happens to contain.
+    """
+    live = (
+        "safe\r<script",
+        "safe\r\n<script",
+        "safe\n> <script",
+        "> - <script",
+        "safe\r> <script",
+    )
+    for text in live:
         assert LIVE_RAW_HTML.search(text) is not None, (
             f"the oracle treats the live opener {text!r} as inert"
         )

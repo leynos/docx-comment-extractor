@@ -78,11 +78,33 @@ start and end markers rather than a general overlap graph.
   renderer's own CriticMarkup markers along with every later block. The guard
   matches the start condition a reader applies: the beginning of any line, not
   merely the beginning of the rendered text, with up to three leading spaces,
-  and with the block tag names matched case-insensitively. A Word line break
-  reaches the renderer as a newline and leaves a real line start behind, so the
-  guard has to act there too. Indentation and the rest of the opener are
-  preserved, and the same prefixes mid-line stay untouched, because escaping
-  them would be a visible change to text no reader treats as markup.
+  and with the block tag names matched case-insensitively.
+
+  A line also ends at a carriage return, not only at a line feed. A Word `w:br`
+  or `w:cr` reaches the renderer as a newline, but a numeric character
+  reference such as `&#13;` survives XML parsing as a real CR, so both endings
+  are reachable and both are guarded.
+
+  A blockquote or list marker before the opener is folded away as well. An
+  opener inside a container is promoted to an HTML block *within* that
+  container, exactly as indentation at the top level promotes it, so a guard
+  that considered only indentation left the opener live inside a list item.
+
+  Indentation, the container prefix, and the rest of the opener are preserved,
+  and the same prefixes mid-line stay untouched, because escaping them would be
+  a visible change to text no reader treats as markup.
+
+  The prefix admits a tab where the specification lets one satisfy a required
+  column, and that is a deliberate over-approximation. A list marker's
+  separator is bounded by four *columns*, and a tab advances to the next
+  four-column stop rather than filling one, so a character-count pattern
+  matches a tab-heavy prefix such as `-\t\t` that a reader sees as indented
+  code. The pattern stays sound — it never misses a block the reader opens —
+  and it is exact on text without tabs, which is the domain the property
+  generator draws from. The cost of the over-approximation is bounded in both
+  directions: the escape is invisible in prose, and inside a code block a
+  complete tag is already entity-escaped, so the guard changes nothing a reader
+  would otherwise have seen.
 
 ## Unsupported content
 
@@ -174,22 +196,28 @@ Two further tests keep those oracles honest:
   escaping residues, and asserts that real escaping output contains no token a
   CommonMark parser recognizes. The corpus pins the line-start start condition
   explicitly, including indented and uppercase openers, openers after a line
-  break, and the split-run shapes Word produces, because the oracle and the
-  renderer once shared the same blind spot and agreeing on a defect excluded
-  nothing. The corpus covers the shapes the specification recognizes, the
-  near-misses around them, and the residues real escaping leaves behind; it is
-  a curated corpus rather than an exhaustive catalogue of CommonMark HTML.
+  feed, after a carriage return, and after a line break, openers reached
+  through a blockquote or list container at every nesting the alphabet reaches,
+  and the split-run shapes Word produces, because the oracle and the renderer
+  once shared the same blind spot and agreeing on a defect excluded nothing.
+  The corpus covers the shapes the specification recognizes, the near-misses
+  around them, and the residues real escaping leaves behind; it is a curated
+  corpus rather than an exhaustive catalogue of CommonMark HTML.
   `markdown-it-py` is declared in the development dependency group, not the
   production one, and the calibration is imported unconditionally so it cannot
   silently skip.
 - `tests/unit/test_renderer_oracle_sensitivity.py` deliberately breaks one
   renderer behaviour at a time and shows the oracle rejects the result. It
   covers per-fragment escaping, grouping that ignores comment boundaries, a
-  removed backslash-doubling rule, the pre-repair HTML-block guard that missed
-  indented and case-insensitive openers, live markup in a comment reference,
-  and a highlight displaced onto the wrong span, alongside controls showing the
-  unmutated renderer is accepted and that the reference and extent oracles
-  accept correct output.
+  removed backslash-doubling rule, both generations of pre-repair HTML-block
+  guard, live markup in a comment reference, and a highlight displaced onto the
+  wrong span, alongside controls showing the unmutated renderer is accepted and
+  that the reference and extent oracles accept correct output. The guard is
+  mutated twice because it was repaired twice: the first form acted only at
+  string position zero and matched block tag names case-sensitively, and the
+  second recognized every line but relied on a bare multiline `^`, which
+  matches after a line feed and nowhere else, and folded away indentation
+  without folding away blockquote or list markers.
 
 The coverage has limits worth recording. The round-trip property uses an
 alphabet without backslashes, because an input already containing an escape

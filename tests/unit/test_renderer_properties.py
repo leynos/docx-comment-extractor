@@ -8,17 +8,24 @@ implementation and a copy of it cannot hide behind the test.
 The suite is a bounded search, not a proof, and its domain excludes several
 cases on purpose. Newlines are not absent: a Word ``w:br`` or ``w:cr`` reaches
 the renderer as ``"\n"``, so the composition alphabet includes the line feed
-and the generated text can begin a line. What that alphabet still cannot reach
-is a bare carriage return, which CommonMark also treats as a line ending; the
-extractor emits ``"\n"`` for both break elements and XML parsing normalizes a
-literal CR in character data, so the shape is out of scope rather than
-overlooked. Authors and timestamps are absent, and the composition property
-generates a fixed comment body rather than arbitrary text; the escape
-properties cover arbitrary bodies through ``escape_criticmarkup_text``, which
-is the function the renderer applies to them. The extractor is not exercised
-here; only the renderer and its escape functions are. Malformed, nested, and
-overlapping ranges are not generated, because the supported range model is a
-sequence of disjoint ranges. Coverage of those exclusions lives in
+and the generated text can begin a line. That alphabet still cannot reach a
+bare carriage return, which CommonMark also treats as a line ending, because
+the extractor emits ``"\n"`` for both break elements.
+
+The CR shape is nevertheless reachable, and it is guarded rather than assumed
+away. A numeric character reference such as ``&#13;`` survives XML parsing as a
+real CR even though a literal CR in character data is normalized to a line
+feed, so a producer that writes one delivers the shape. The alphabet does not
+draw it, but the pinned examples, the calibration corpus, and the serialized
+fixture in ``tests/unit/test_renderer.py`` all cover it.
+
+Authors and timestamps are absent, and the composition property generates a
+fixed comment body rather than arbitrary text; the escape properties cover
+arbitrary bodies through ``escape_criticmarkup_text``, which is the function
+the renderer applies to them. The extractor is not exercised here; only the
+renderer and its escape functions are. Malformed, nested, and overlapping
+ranges are not generated, because the supported range model is a sequence of
+disjoint ranges. Coverage of those exclusions lives in
 ``tests/unit/test_extractor.py`` and ``tests/unit/test_cli.py`` instead.
 """
 

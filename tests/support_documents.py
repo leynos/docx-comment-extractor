@@ -336,6 +336,59 @@ def build_malformed_xml_docx(path: Path) -> Path:
     return path
 
 
+def build_carriage_return_docx(path: Path) -> Path:
+    """Create a document whose text carries a real carriage return.
+
+    A literal CR in XML character data is normalized to a line feed by the XML
+    parser, so the only way a carriage return reaches the renderer is as a
+    numeric character reference. That is not a synthetic shape: an editor or a
+    converter that writes ``&#13;`` produces exactly this, and CommonMark treats
+    the resulting CR as a line ending, which is where an opener after it becomes
+    an HTML block.
+
+    The reference is injected into the serialized part rather than through
+    ``python-docx``, which turns a literal CR into a ``<w:br/>`` element and so
+    cannot express the shape at all.
+
+    The opener is a comment rather than a block tag name, because the renderer
+    wraps the text in ``{==``/``==}`` and a tag name needs whitespace or a tag
+    terminator after it. ``<!--`` is live on its own, so it reaches the guard as
+    a real block opener rather than as an inert near-miss.
+
+    Parameters
+    ----------
+    path
+        Destination path for the fixture document.
+
+    Returns
+    -------
+    Path
+        ``path`` after the fixture document has been saved.
+
+    """
+    document = Document()
+    paragraph = document.add_paragraph()
+    run = paragraph.add_run("placeholder<!--")
+    comment = document.add_comment(run, text="Carriage-return opener.", author="CR")
+    _set_fixed_timestamp(comment)
+    document.save(str(path))
+
+    with ZipFile(path, "r") as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+
+    part = members["word/document.xml"]
+    replaced = part.replace(b"placeholder", b"safe&#13;")
+    if replaced == part:
+        message = "The carriage-return fixture should still carry its placeholder."
+        raise AssertionError(message)
+    members["word/document.xml"] = replaced
+
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    return path
+
+
 def build_missing_style_attribute_docx(path: Path) -> Path:
     """Create a document whose paragraph style element lacks its required value.
 
@@ -392,6 +445,7 @@ def build_fixture(name: str, path: Path) -> Path:
         "timezone-aware-comment": build_timezone_aware_comment_docx,
         "excessive-package-members": build_excessive_package_members_docx,
         "oversized-uncompressed": build_oversized_uncompressed_docx,
+        "carriage-return": build_carriage_return_docx,
     }
     return builders[name](path)
 

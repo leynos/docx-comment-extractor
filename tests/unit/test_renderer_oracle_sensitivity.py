@@ -19,6 +19,7 @@ from docx_comment_extractor.renderer import render_document
 from tests.support_renderer_oracles import (
     apply_boundary_insensitive_escaping,
     apply_leading_only_html_block_guard,
+    apply_lf_only_indent_html_block_guard,
     apply_missing_backslash_rule,
     apply_per_fragment_escaping,
     composition_violation,
@@ -202,6 +203,64 @@ def test_oracle_detects_indented_and_case_insensitive_openers(
         rendered = render_document(_document((text,)))
         assert composition_violation(rendered) is not None, (
             f"a missed HTML-block opener was not detected in {rendered!r}"
+        )
+
+
+def test_oracle_detects_carriage_return_and_container_openers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The LF-only, indent-only guard's misses should be rejected, not accepted.
+
+    The guard this replaces anchored with ``(?m:^)``, which Python matches after
+    a line feed and nowhere else, and permitted only three spaces of indent. Two
+    shapes therefore stayed live: an opener whose line ended at a carriage
+    return, and one reached through a blockquote or list marker, which promotes
+    the opener to a block inside the container. The shared oracle had the same
+    blind spot, so the properties could not have caught either. This control
+    pins the oracle's sensitivity to both.
+    """
+    apply_lf_only_indent_html_block_guard(monkeypatch)
+
+    # Each of these is live for the parser, reached the pre-repair guard, and
+    # was left alone by it. A bare CR is the distinguishing case for the anchor:
+    # a CRLF line already ends in a line feed, so the old ``(?m:^)`` matched it
+    # and it cannot show the defect.
+    misses = (
+        "safe\r<script",
+        "safe\r<!--",
+        "> <script",
+        "> <!--",
+        "- <script",
+        "1. <script",
+        "> - > <script",
+    )
+    for text in misses:
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is not None, (
+            f"a missed HTML-block opener was not detected in {rendered!r}"
+        )
+
+
+def test_healthy_renderer_guards_carriage_return_and_container_openers() -> None:
+    """The control: the current guard neutralizes both shapes.
+
+    Without this, the mutation above could pass because the oracle rejects
+    every input rather than because the pre-repair guard missed these.
+    """
+    for text in (
+        "safe\r<script",
+        "safe\r\n<script",
+        "safe\r<!--",
+        "safe\r\n<!--",
+        "> <script",
+        "> <!--",
+        "- <script",
+        "1. <script",
+        "> - > <script",
+    ):
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is None, (
+            f"the current renderer produced unsafe output: {rendered!r}"
         )
 
 
