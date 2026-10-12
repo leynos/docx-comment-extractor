@@ -18,6 +18,8 @@ from docx_comment_extractor.models import Block, Comment, DocumentModel, Fragmen
 from docx_comment_extractor.renderer import render_document
 from tests.support_renderer_oracles import (
     apply_boundary_insensitive_escaping,
+    apply_generation_3_html_block_guard,
+    apply_generation_3_raw_html_pattern,
     apply_leading_only_html_block_guard,
     apply_lf_only_indent_html_block_guard,
     apply_missing_backslash_rule,
@@ -315,3 +317,131 @@ def test_oracle_detects_displaced_highlight_extents() -> None:
 
     with pytest.raises(AssertionError, match="should highlight its own source span"):
         assert_highlights_match_source_ranges(document, displaced)
+
+
+# The continuation shapes the pre-repair guard left live: a container opened on
+# one line whose opener arrives on a later one. Every entry is live for the
+# parser, was reachable through ``render_document``, and slipped past the
+# column-bounded, per-line guard.
+CONTINUATION_OPENER_MISSES = (
+    "10. item\n    <script",
+    "123456789. item\n           <script",
+    "- outer\n  - inner\n    <script",
+    "> 10. item\n>     <script",
+    "10. item\n    > <!--",
+    "- item\n\n    <script",
+    "10. item\r    <script",
+    "10. item\r\n    <script",
+    "10. item\r    <!--",
+    "10. item\r\n    <!--",
+    "> 10. item\r>     <script",
+)
+
+
+def test_oracle_detects_continuation_openers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    r"""The stateless guard's continuation misses should be rejected, not accepted.
+
+    The guard this replaces had the right anchor and folded away every
+    container *on the line carrying the marker*. What no per-line rule can do is
+    follow a container onto a later line: CommonMark retains it across the break
+    (and across a blank line), and the continuation line's indentation is
+    measured from the container's content column rather than from the document
+    margin. So ``"10. item\n    <script"`` opened a real ``html_block`` while
+    the guard inspected that line alone and saw four spaces of indent.
+
+    This is the paired mutation for the continuation repair. The oracle has to
+    report every one of these, or the safety property passes over a live block.
+    """
+    apply_generation_3_html_block_guard(monkeypatch)
+
+    for text in CONTINUATION_OPENER_MISSES:
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is not None, (
+            f"a missed continuation opener was not detected in {rendered!r}"
+        )
+
+
+def test_healthy_renderer_guards_continuation_openers() -> None:
+    """The control: the repaired guard neutralizes every continuation shape.
+
+    Without this, the mutation above could pass because the oracle rejects every
+    input rather than because the pre-repair guard missed these.
+    """
+    for text in CONTINUATION_OPENER_MISSES:
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is None, (
+            f"the current renderer produced unsafe output: {rendered!r}"
+        )
+
+
+def test_oracle_detects_continuation_openers_split_across_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A continuation opener split across Word runs should still be caught.
+
+    The container opens in one fragment and the opener sits on a later line of
+    the next, so the guard only sees the assembled form once the renderer has
+    joined them. This is the run-boundary form of the mutation above.
+    """
+    apply_generation_3_html_block_guard(monkeypatch)
+
+    for fragments in (
+        ("10. item\n", "    <script"),
+        ("10. item\n   ", " <script"),
+        ("> 10. item\n>", "     <script"),
+        ("10. item\r", "    <!--"),
+    ):
+        rendered = render_document(_document(fragments))
+        assert composition_violation(rendered) is not None, (
+            f"a missed continuation opener was not detected in {rendered!r}"
+        )
+
+
+def test_healthy_renderer_guards_continuation_openers_split_across_runs() -> None:
+    """The control for the run-boundary form of the continuation repair."""
+    for fragments in (
+        ("10. item\n", "    <script"),
+        ("10. item\n   ", " <script"),
+        ("> 10. item\n>", "     <script"),
+        ("10. item\r", "    <!--"),
+    ):
+        rendered = render_document(_document(fragments))
+        assert composition_violation(rendered) is None, (
+            f"the current renderer produced unsafe output: {rendered!r}"
+        )
+
+
+def test_oracle_detects_a_mid_line_processing_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pre-repair raw-HTML pattern's mid-line PI miss should be rejected.
+
+    ``RAW_HTML_PATTERN``'s first character class held letters, ``!`` and ``/``,
+    so a processing instruction beginning ``<?`` never matched the mid-line tag
+    rule. At a line start the block-opener guard still caught one, which is why
+    the gap only showed inside a line: a fragment reading ``"a <?php ?>"``
+    escaped to itself and a reader saw ``html_inline``.
+    """
+    apply_generation_3_raw_html_pattern(monkeypatch)
+
+    for text in ("a <?php ?>", "safe <?php echo 1; ?> safe", "a <? x ?>"):
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is not None, (
+            f"a live mid-line processing instruction was not detected: {rendered!r}"
+        )
+
+
+def test_healthy_renderer_guards_a_mid_line_processing_instruction() -> None:
+    """The control: the repaired pattern neutralizes a mid-line PI.
+
+    The line-start forms are deliberately included. They were already guarded
+    before the repair, so a control that only exercised them would pass against
+    the mutant and prove nothing about the mid-line rule.
+    """
+    for text in ("a <?php ?>", "safe <?php echo 1; ?> safe", "<?php ?>", "a <? x ?>"):
+        rendered = render_document(_document((text,)))
+        assert composition_violation(rendered) is None, (
+            f"the current renderer produced unsafe output: {rendered!r}"
+        )

@@ -176,15 +176,22 @@ silently skip out of a passing run.
 `tests/unit/test_renderer_oracle_sensitivity.py` mutates the renderer with
 `monkeypatch`, one behaviour at a time, and shows the oracle rejects the
 result. It covers per-fragment escaping, grouping that ignores comment
-boundaries, a removed backslash-doubling rule, two generations of pre-repair
-HTML-block guard, live markup in a comment reference, and a highlight displaced
-onto the wrong span. The first guard acted only at string position zero and
-matched block tag names case-sensitively; the second applied at every line but
-anchored with a bare multiline `^`, which Python matches after a line feed and
-nowhere else, and folded away indentation but not blockquote or list markers.
-Control cases confirm the unmutated renderer is accepted and that the reference
-and extent oracles accept correct output, so a rejection cannot be explained by
-an oracle that rejects everything.
+boundaries, a removed backslash-doubling rule, three generations of pre-repair
+HTML-block guard, the pre-repair raw-HTML pattern, live markup in a comment
+reference, and a highlight displaced onto the wrong span. The first guard acted
+only at string position zero and matched block tag names case-sensitively; the
+second applied at every line but anchored with a bare multiline `^`, which
+Python matches after a line feed and nowhere else, and folded away indentation
+but not blockquote or list markers; the third reached every line and container
+on the line carrying the marker, but folded a *column-bounded* prefix, so a
+continuation line whose container opened earlier stayed live. The raw-HTML
+pattern's first character class held letters, `!` and `/`, so a mid-line
+processing instruction beginning `<?` was never escaped. Each continuation and
+processing-instruction mutation is paired with a control confirming the
+repaired renderer neutralizes the same shapes. Control cases confirm the
+unmutated renderer is accepted and that the reference and extent oracles accept
+correct output, so a rejection cannot be explained by an oracle that rejects
+everything.
 
 Limits of the coverage. The round-trip oracle uses an alphabet without
 backslashes, because `strip_documented_escapes` inverts the bracket rule by

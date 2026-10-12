@@ -37,7 +37,14 @@ MARKDOWN_TEXT_ESCAPE_SEQUENCES = (
     ("[", r"\["),
     ("]", r"\]"),
 )
-RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
+# The first character class decides which *mid-line* constructs are protected:
+# the HTML-block guard below only reaches an opener at a line start, so anything
+# it omits here is left live wherever it sits inside a line. A processing
+# instruction begins ``<?`` and never reached this pattern while the class held
+# only letters, ``!`` and ``/``, so a mid-line ``<?php ?>`` survived escaping
+# intact and a reader saw raw HTML. ``?`` is added for it. The CDATA opener is
+# already covered through its ``!``.
+RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!?/][^>]*)>")
 
 # ``RAW_HTML_PATTERN`` only guards a construct whose ``>`` is present. A line
 # that *begins* with an HTML-block opener and never closes it is neutralized
@@ -56,25 +63,34 @@ RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
 # reachable. Python's ``(?m:^)`` recognizes only the line feed, which is why the
 # anchor is spelled out here rather than written as a flag.
 #
-# It permits up to three leading spaces -- Word will not have stripped the
-# indentation -- and it also folds away any blockquote and list container
-# prefix, because an opener inside one is promoted to a block *within* the
-# container just as indentation promotes it at the top level. Failing to consider
-# containers left an opener live inside a list item or blockquote, where the
-# resulting block swallowed the renderer's own CriticMarkup markers.
+# It folds away any interleaving of whitespace and container markers before the
+# opener, rather than only the three spaces of indentation a parser would allow.
+# A parser folds the markers it has just seen on *this* line; this guard escapes
+# one buffer at a time and cannot recompute a continuation line's content column,
+# because that column depends on a container opened earlier and survived by the
+# reader across the blank line ``render_document`` inserts between blocks.
+# CommonMark retains a container across a blank line, so a list item and its
+# continuation arrive as separate buffers and are still one item to the reader.
+# Folding any run of markers and whitespace is the only per-buffer rule that
+# reaches the continuation shapes.
 #
-# The prefix admits a tab wherever the specification lets one satisfy a
-# required column: a blockquote marker folds up to four whitespace characters
-# and needs none at all, while a list marker takes one to four. That is a column
-# bound rather than a character bound, so a tab-heavy prefix such as ``-\t\t``
-# is matched even where a reader sees indented code. The over-approximation is
-# deliberate: the escape it produces is invisible in prose, the visible cost
-# inside a code block is pre-existing because a complete tag is already
-# entity-escaped, and the alternative is a guard that misses reachable blocks.
+# The over-approximation that buys is real and visible, and it is not confined
+# to prose. A line a parser reads as indented code is guarded too, so
+# ``"    <script"`` becomes ``"    &lt;script"``. CommonMark decodes an entity in
+# prose but *not* inside a code span or a code block, so that renders as
+# ``&amp;lt;script`` where the unguarded form rendered ``&lt;script``. The
+# alternative -- a stateless guard that folds only three spaces -- leaves a
+# reachable ``html_block`` live, which is the defect this pattern exists to
+# prevent. Erring towards escaping is bounded and visible; erring towards
+# missing is a swallowed document.
 #
 # The block tag names are matched case-insensitively, as the specification
 # requires, while a declaration (``<!`` plus a letter) keeps the uppercase-only
-# spelling the specification gives it.
+# spelling the specification gives it. CommonMark restricts the *type 1* names
+# (``pre``, ``script``, ``style``, ``textarea``) to the opening form alone, so
+# ``</pre`` is inert at a line start while ``</div`` is live. Matching every name
+# in both forms over-approximates by those four closing tags, which errs the same
+# way as the prefix and costs less than a second branch.
 #
 # Only the leading bracket is consumed: the lookahead asserts which opener
 # follows, and the named group then captures the ``<`` that the substitution
@@ -82,8 +98,9 @@ RAW_HTML_PATTERN = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
 # preserved so the rendered text still reads as the source did.
 HTML_BLOCK_OPENER = re.compile(
     r"(?:(?<=\n)|(?<=\r)|\A)"
-    r"(?P<prefix> {0,3}"
-    r"(?:>[ \t]{0,4}|[-+*][ \t]{1,4}|[0-9]{1,9}[.)][ \t]{1,4})*)"
+    # Every alternative begins with a distinct character, so no run of markers
+    # can be divided two ways and the repetition stays linear.
+    r"(?P<prefix>(?:[ \t]|>|[-+*]|[0-9]{1,9}[.)])*)"
     r"(?="
     r"<!--"
     r"|<\?"

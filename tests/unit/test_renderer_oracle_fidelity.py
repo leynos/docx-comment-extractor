@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from markdown_it import MarkdownIt
 
-from tests.support_renderer_oracles import LIVE_RAW_HTML
+from tests.support_renderer_oracles import live_raw_html
 
 # Each case pairs a snippet with the classification a CommonMark reader gives
 # it. The corpus covers every raw-HTML shape the specification recognizes, the
@@ -114,6 +114,35 @@ CALIBRATION_CASES: tuple[tuple[str, bool], ...] = (
     ("> - > <script", True),
     ("> <script\n{==x==}{>>note<<}", True),
     ("- safe\n- <!--", True),
+    # A continuation line. CommonMark retains a container across lines and
+    # across a blank line, and the continuation line's indentation is measured
+    # from the container's content column rather than from the document margin.
+    # A stateless per-line rule cannot recompute that column, so these shapes
+    # were live while every marker-carrying line was guarded.
+    ("10. item\n    <script", True),
+    ("10. item\n    <!--", True),
+    ("123456789. item\n           <script", True),
+    ("- item\n\n    <script", True),
+    ("10. item\n\n    <script", True),
+    ("1) item\n    <!--", True),
+    ("- item\nsafe\n    <script", True),
+    # A continuation line that carries a marker of its own: the nested container
+    # is entered on the *second* line, so the opener sits behind a marker the
+    # first line never showed.
+    ("> 10. item\n>     <script", True),
+    ("- outer\n  - inner\n    <script", True),
+    ("10. item\n    > <!--", True),
+    ("> - item\n>     <pre", True),
+    ("- outer\n  - inner\n      <div", True),
+    # Carriage-return variants of the same shapes. A line ends at a bare CR for
+    # CommonMark, so the continuation rule has to see both endings.
+    ("10. item\r    <script", True),
+    ("10. item\r\n    <script", True),
+    ("10. item\r    <!--", True),
+    ("10. item\r\n    <!--", True),
+    ("> 10. item\r>     <script", True),
+    ("- outer\r\n  - inner\r\n    <script", True),
+    ("10. item\r\n    > <!--", True),
     # Near-misses that must not match.
     # Four spaces is indented code, not an HTML block; a tab is not a space.
     ("    <script", False),
@@ -177,7 +206,7 @@ def test_oracle_agrees_with_commonmark(text: str, *, is_live: bool) -> None:
     """The oracle's verdict should match a real CommonMark parser's."""
     markdown = MarkdownIt("commonmark")
     parser_verdict = bool(_live_html_tokens(markdown, text))
-    oracle_verdict = bool(LIVE_RAW_HTML.search(text))
+    oracle_verdict = live_raw_html(text) is not None
     assert oracle_verdict == parser_verdict == is_live, (
         f"{text!r}: oracle={oracle_verdict} parser={parser_verdict} expected={is_live}"
     )
@@ -279,6 +308,21 @@ PINNED_LINE_START_OPENERS: tuple[str, ...] = (
     "> <script\n{==x==}{>>note<<}",
     "safe\r<script\n{==x==}{>>note<<}",
     "- safe\n- <!--",
+    # A continuation line inside a container opened earlier. The reader retains
+    # the container across the break, so the opener sits inside the item and the
+    # markers below are swallowed by the block it opens.
+    "10. item\n    <script",
+    "10. item\n    <script\n{==x==}{>>note<<}",
+    "10. item\n    <!--",
+    "123456789. item\n           <script",
+    "- outer\n  - inner\n    <script",
+    "> 10. item\n>     <script",
+    "10. item\n    > <!--",
+    "- item\n\n    <script",
+    "10. item\r    <script",
+    "10. item\r\n    <script",
+    "10. item\r    <!--",
+    "> 10. item\r>     <script",
 )
 
 
@@ -357,6 +401,23 @@ PINNED_SPLIT_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("> -", " > <script"),
 )
 
+# The same contract for a *continuation* line: the break that opens the
+# container and the line that continues it are split across Word runs, so the
+# guard only sees the assembled form once the renderer has joined them. Each
+# pair is split inside the continuation line's own prefix rather than inside the
+# opener, so nothing here is covered by the escape rule alone.
+PINNED_SPLIT_CONTINUATIONS: tuple[tuple[str, ...], ...] = (
+    ("10. item\n", "    <script"),
+    ("10. item\n   ", " <script"),
+    ("10. item\r", "    <!--"),
+    ("10. item\r\n", "    <script"),
+    ("- outer\n  - inner\n ", "   <script"),
+    ("> 10. item\n>", "     <script"),
+    ("10. item\n ", "   > <!--"),
+    ("123456789. item\n     ", "      <script"),
+    ("- item\n\n", "    <script"),
+)
+
 
 @pytest.mark.parametrize(("fragments"), PINNED_SPLIT_PREFIXES)
 def test_render_document_neutralizes_openers_split_across_runs(
@@ -383,6 +444,78 @@ def test_render_document_neutralizes_openers_split_across_runs(
     )
 
 
+@pytest.mark.parametrize(("fragments"), PINNED_SPLIT_CONTINUATIONS)
+def test_render_document_neutralizes_continuation_openers_split_across_runs(
+    fragments: tuple[str, ...],
+) -> None:
+    """A continuation opener split across Word runs should be neutralized.
+
+    The container opens in the first fragment and the opener sits on a later
+    line of the second, so the guard has to fold away markers the reader never
+    saw on the opener's own line. Joined, the pair is a live ``html_block``:
+    the container survives the line break and its content column puts the
+    opener inside the item rather than in indented code.
+    """
+    from docx_comment_extractor.models import Block, DocumentModel, Fragment
+    from docx_comment_extractor.renderer import render_document
+
+    markdown = MarkdownIt("commonmark")
+    document = DocumentModel(
+        blocks=(Block("paragraph", tuple(Fragment(text) for text in fragments)),),
+        comments=(),
+    )
+    rendered = render_document(document)
+    assert not _live_html_tokens(markdown, rendered), (
+        f"{fragments!r} rendered to live markup {rendered!r}"
+    )
+
+
+# A processing instruction is raw HTML to a CommonMark reader wherever it
+# appears, not only at a line start. The raw-HTML rule that protects a complete
+# mid-line tag could not match one, because its first character class held
+# letters, ``!`` and ``/`` but not ``?``; at a line start the block-opener guard
+# covered it, which is why the gap only showed mid-line.
+PINNED_PROCESSING_INSTRUCTIONS: tuple[str, ...] = (
+    "a <?php ?>",
+    "a <? ?>",
+    "a <? x ?>",
+    "a <?x?>",
+    "safe <?php echo 1; ?> safe",
+    "<?php ?>",
+)
+
+
+@pytest.mark.parametrize("text", PINNED_PROCESSING_INSTRUCTIONS)
+def test_escaping_neutralizes_processing_instructions(text: str) -> None:
+    """A mid-line processing instruction should be neutralized, not passed on.
+
+    A reader sees ``<?php ?>`` as raw HTML inside a paragraph just as it does
+    at a line start, so a fragment carrying one reached downstream HTML verbatim.
+    """
+    from docx_comment_extractor.renderer import escape_criticmarkup_text
+
+    markdown = MarkdownIt("commonmark")
+    escaped = escape_criticmarkup_text(text)
+    assert not _live_html_tokens(markdown, escaped), (
+        f"{text!r} escaped to live markup {escaped!r}"
+    )
+
+
+def test_render_document_neutralizes_a_mid_line_processing_instruction() -> None:
+    """The same defect through the public API, where it was observable."""
+    from docx_comment_extractor.models import Block, DocumentModel, Fragment
+    from docx_comment_extractor.renderer import render_document
+
+    markdown = MarkdownIt("commonmark")
+    document = DocumentModel(
+        blocks=(Block("paragraph", (Fragment("a <?php ?>"),)),), comments=()
+    )
+    rendered = render_document(document)
+    assert not _live_html_tokens(markdown, rendered), (
+        f"rendered to live markup {rendered!r}"
+    )
+
+
 def test_oracle_guards_every_opener_escaping_neutralizes() -> None:
     """The oracle must detect the shapes the renderer actually guards.
 
@@ -391,7 +524,7 @@ def test_oracle_guards_every_opener_escaping_neutralizes() -> None:
     oracle to keep the two from drifting back into agreement on a defect.
     """
     for text in PINNED_LINE_START_OPENERS:
-        assert LIVE_RAW_HTML.search(text) is not None, (
+        assert live_raw_html(text) is not None, (
             f"the oracle treats the live opener {text!r} as inert"
         )
 
@@ -414,6 +547,6 @@ def test_oracle_shares_the_line_start_condition_it_claims_to_judge() -> None:
         "safe\r> <script",
     )
     for text in live:
-        assert LIVE_RAW_HTML.search(text) is not None, (
+        assert live_raw_html(text) is not None, (
             f"the oracle treats the live opener {text!r} as inert"
         )

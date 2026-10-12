@@ -110,6 +110,16 @@ before rendering, so text such as `{>>literal<<}` remains literal Markdown:
 Raw HTML and Markdown link syntax in source text and comment bodies are also
 neutralized before rendering, so untrusted content remains literal text.
 
+The escape is deliberately wider than a Markdown parser's own rules for one
+case. Text that could begin an HTML block — an unclosed `<script`, or a tag or
+comment reached through a list or blockquote marker — is escaped even where the
+parser would have treated it as ordinary indented code. A reader of the
+rendered Markdown sees `&amp;lt;script` where the unescaped text would have
+shown `&lt;script`, because an entity is not decoded inside a code block. This
+affects text that was already indented as code and contains a `<`; it is a
+visible change, and it is preferred to the alternative, where a missed opener
+swallows the rest of the document.
+
 Comment metadata follows these rules:
 
 - Author names are stripped of surrounding whitespace; a blank author is

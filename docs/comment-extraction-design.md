@@ -70,7 +70,13 @@ start and end markers rather than a general overlap graph.
 - Literal CriticMarkup delimiters in source text or comment bodies are escaped
   with backslashes before rendering.
 - Raw HTML and Markdown link syntax in source text or comment bodies are
-  neutralized before rendering so untrusted content remains literal text.
+  neutralized before rendering so untrusted content remains literal text. The
+  raw-HTML rule applies anywhere inside a line, so it also covers the forms a
+  parser accepts mid-line but not at a line start: a complete tag, a
+  declaration, a CDATA section, and a processing instruction such as
+  `<?php ?>`. A processing instruction needed its own first-character branch;
+  without it the rule matched tag names, declarations, and CDATA but passed a
+  mid-line `<?` through unescaped.
 - Escaping also covers text that *begins* a line with an HTML-block opener and
   never closes it, such as a bare `<!--` or `<script`. CommonMark begins an
   HTML block at the start of a line for these prefixes and runs the block to
@@ -90,21 +96,54 @@ start and end markers rather than a general overlap graph.
   container, exactly as indentation at the top level promotes it, so a guard
   that considered only indentation left the opener live inside a list item.
 
-  Indentation, the container prefix, and the rest of the opener are preserved,
-  and the same prefixes mid-line stay untouched, because escaping them would be
-  a visible change to text no reader treats as markup.
+  The container need not appear on the opener's own line. CommonMark retains
+  container state across a line break and across a blank line, and a
+  continuation line's indentation is measured from the container's content
+  column rather than from the document margin, so `10. item\n    <script` is a
+  list item holding indented code — and an opener — for the reader, while a
+  guard inspecting that line alone sees four spaces and nothing more. A marker
+  may also lead the continuation line itself, as in `10. item\n    > <!--`.
+  Because `render_document` joins blocks with a blank line and the reader
+  retains the container across it, a container opened in one block can govern
+  the next, so the guard cannot treat a buffer in isolation.
 
-  The prefix admits a tab where the specification lets one satisfy a required
-  column, and that is a deliberate over-approximation. A list marker's
-  separator is bounded by four *columns*, and a tab advances to the next
-  four-column stop rather than filling one, so a character-count pattern
-  matches a tab-heavy prefix such as `-\t\t` that a reader sees as indented
-  code. The pattern stays sound — it never misses a block the reader opens —
-  and it is exact on text without tabs, which is the domain the property
-  generator draws from. The cost of the over-approximation is bounded in both
-  directions: the escape is invisible in prose, and inside a code block a
-  complete tag is already entity-escaped, so the guard changes nothing a reader
-  would otherwise have seen.
+  The container prefix and the rest of the opener are preserved, and the same
+  prefixes mid-line stay untouched, because escaping them would be a visible
+  change to text no reader treats as markup.
+
+  The guard folds away any run of indentation and container markers, rather
+  than the bounded prefix a parser computes. That is a deliberate
+  over-approximation with two causes. A list marker's separator is bounded by
+  four *columns*, and a tab advances to the next four-column stop rather than
+  filling one, so a character-count pattern matches a tab-heavy prefix such as
+  `-\t\t` that a reader sees as indented code. More fundamentally, a
+  continuation line's content column depends on a container opened on an
+  earlier line and retained across the blank line between blocks; the guard
+  escapes one buffer at a time and cannot recompute that column, so it must
+  accept any marker run rather than a specified number of columns.
+
+  The claims made for the pattern are correspondingly bounded. That the guard
+  leaves no parser-live opener behind was checked against `markdown-it-py` over
+  the corpora described below: a structured corpus of container and
+  continuation shapes, where the count of parser-live outputs fell from 1932 to
+  zero under the guard, and a random corpus of 30000 strings, where the count
+  fell from 2803 to zero and a bracket-counting cross-check over 4000 further
+  strings reported no mismatch. A finite corpus does not establish the property
+  beyond the shapes it draws, so this is evidence for those shapes rather than
+  a universal soundness claim. Exactness is not claimed at all: because the
+  folded prefix is unbounded, the guard escapes text a parser reads as indented
+  code, so it is not exact even on input that contains no tab.
+
+  The cost is visible rather than invisible, and the earlier claim that a code
+  block is unaffected was wrong. A parser reads four-space-indented `<script`
+  as indented code; the guard still escapes the bracket, and CommonMark decodes
+  an entity in prose but not inside a code span or code block, so the reader
+  sees `&amp;lt;script` where the unguarded form rendered `&lt;script`. Over a
+  corpus of 2919 container-and-opener rows, 1204 differed at the text level and
+  943 of those differed in the rendered HTML a reader would see: 847 involving
+  a code block and 96 prose only. That is the price of the only per-buffer rule
+  that reaches the continuation shapes. It errs towards escaping: a spurious
+  entity is visible and bounded, while a missed opener is a swallowed document.
 
 ## Unsupported content
 
@@ -199,25 +238,35 @@ Two further tests keep those oracles honest:
   feed, after a carriage return, and after a line break, openers reached
   through a blockquote or list container at every nesting the alphabet reaches,
   and the split-run shapes Word produces, because the oracle and the renderer
-  once shared the same blind spot and agreeing on a defect excluded nothing.
-  The corpus covers the shapes the specification recognizes, the near-misses
-  around them, and the residues real escaping leaves behind; it is a curated
-  corpus rather than an exhaustive catalogue of CommonMark HTML.
+  once shared the same blind spot and agreeing on a defect excluded nothing. It
+  also pins the continuation shapes: an opener on a later line of an ordered
+  list item, a nested list, a container that survives a blank line, a container
+  inside a container, and each of those with a carriage return or CRLF in place
+  of the line feed. The corpus covers the shapes the specification recognizes,
+  the near-misses around them, and the residues real escaping leaves behind; it
+  is a curated corpus rather than an exhaustive catalogue of CommonMark HTML.
+  The claims resting on it are bounded accordingly: it establishes the
+  behaviour on the shapes it draws, not on every HTML form a parser accepts.
   `markdown-it-py` is declared in the development dependency group, not the
   production one, and the calibration is imported unconditionally so it cannot
   silently skip.
 - `tests/unit/test_renderer_oracle_sensitivity.py` deliberately breaks one
   renderer behaviour at a time and shows the oracle rejects the result. It
   covers per-fragment escaping, grouping that ignores comment boundaries, a
-  removed backslash-doubling rule, both generations of pre-repair HTML-block
-  guard, live markup in a comment reference, and a highlight displaced onto the
-  wrong span, alongside controls showing the unmutated renderer is accepted and
-  that the reference and extent oracles accept correct output. The guard is
-  mutated twice because it was repaired twice: the first form acted only at
-  string position zero and matched block tag names case-sensitively, and the
-  second recognized every line but relied on a bare multiline `^`, which
-  matches after a line feed and nowhere else, and folded away indentation
-  without folding away blockquote or list markers.
+  removed backslash-doubling rule, three generations of pre-repair HTML-block
+  guard, the pre-repair raw-HTML pattern, live markup in a comment reference,
+  and a highlight displaced onto the wrong span, alongside controls showing the
+  unmutated renderer is accepted and that the reference and extent oracles
+  accept correct output. The guard is mutated three times because it was
+  repaired three times: the first form acted only at string position zero and
+  matched block tag names case-sensitively; the second recognized every line
+  but relied on a bare multiline `^`, which matches after a line feed and
+  nowhere else, and folded away indentation without folding away blockquote or
+  list markers; and the third reached every line and container, but folded a
+  column-bounded prefix, which a continuation line defeats because its content
+  column depends on a container opened on an earlier line. The raw-HTML pattern
+  is mutated separately: its first character class omitted `?`, so a mid-line
+  processing instruction survived escaping.
 
 The coverage has limits worth recording. The round-trip property uses an
 alphabet without backslashes, because an input already containing an escape

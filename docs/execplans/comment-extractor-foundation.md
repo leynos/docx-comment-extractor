@@ -460,6 +460,14 @@ repository quality gates.
   live raw HTML, near-misses, and escaping residues, and
   `tests/unit/test_renderer_oracle_sensitivity.py` (mutation-tests the
   oracles). Added a highlight-span oracle, which the previous suite lacked.
+- [x] 2026-10-12: Closed the generation-3 assessment's container and
+  documentation findings. The HTML-block guard is repaired for continuation
+  lines and the raw-HTML pattern for mid-line processing instructions; the
+  oracle grew the corresponding continuation model, parser-calibrated cases,
+  split-run regressions, and paired mutation and healthy-renderer controls; and
+  the design document, developers' guide, users' guide, and this plan now
+  qualify their soundness and exactness claims and record the guard's visible
+  cost. Detail in the Decision Log.
 - [x] 2026-10-11: Fixed a renderer defect found while building the new oracle.
   A block beginning with an unclosed HTML-block opener such as a bare `<!--`
   rendered as a CommonMark `html_block` that runs to the next blank line,
@@ -775,6 +783,55 @@ repository quality gates.
   added — one with a truncated `word/document.xml`, one with a paragraph whose
   `w:pStyle` omits the required `w:val` — and both produce exit status 2 with a
   clean message.
+
+- 2026-10-12: The generation-3 assessment found two live defects, and one was
+  found only by reading a measurement's *output* rather than its totals.
+
+  - The container guard was per-line and stateless. CommonMark retains container
+    state across a line break and across a blank line, and a continuation
+    line's indentation is measured from the container's content column, so
+    `10. item\n    <script` opened a real `html_block` while the guard saw four
+    spaces. `render_document` joins blocks with a blank line, so a container
+    opened in one block also governs the next — which falsified a per-buffer
+    "does this buffer open a container at all?" design outright.
+  - A mid-line processing instruction was never escaped. `RAW_HTML_PATTERN`'s
+    first character class held letters, `!` and `/` but not `?`, so `<?php ?>`
+    inside a line reached the parser as `html_inline`. At a line start the
+    block-opener guard still caught it, which is why the gap only showed
+    mid-line. The property alphabet contained no `?`, so it could not have
+    drawn the shape; the alphabet now includes it.
+
+  The candidate guard's effect was measured against `markdown-it-py`: over a
+  structured corpus of 50100 container-and-opener rows the count of parser-live
+  outputs fell from 1932 to zero, and over 30000 random documents from 2803 to
+  zero, with a separate 4000-string bracket-accounting cross-check reporting no
+  mismatch. Those are the figures the documentation now cites, and they bound
+  the claim: a finite corpus establishes behaviour on the shapes it draws, not
+  universal soundness.
+
+  The guard's visible cost was measured directly rather than argued. Over 2919
+  container-and-opener rows, 1204 differed at the text level and 943 of those
+  differed in rendered HTML — 847 involving a code block, 96 prose only. The
+  design document had claimed the opposite, that a complete tag inside a code
+  block is already entity-escaped so the guard changes nothing a reader sees;
+  that is false, because CommonMark decodes an entity in prose but not inside a
+  code span or block, so four-space-indented `<script` renders as
+  `&amp;lt;script` where it previously rendered `&lt;script`.
+
+- 2026-10-12: Both repairs were verified by reverting only the production file
+  and re-running the touched modules: 30 tests failed against the pre-repair
+  code, including every continuation calibration case, every split-across-runs
+  case, and every processing-instruction case. The paired mutation tests passed
+  against the mutant and the healthy-renderer controls failed, which is the
+  evidence that the oracle is sensitive rather than vacuous. All 239 tests in
+  the three modules pass against the repaired code.
+
+  One earlier assumption was wrong and was caught by measurement rather than
+  reading: `_render_block` joins a contiguous group with `"".join(...)` and no
+  separator, so a split case like `("10. item", "    <script")` renders
+  `10. item    <script` and is inert. A live continuation requires the line
+  break to sit *inside* a fragment, and the pinned split cases were corrected
+  accordingly.
 
 ## Outcomes & Retrospective
 

@@ -23,7 +23,10 @@ if typ.TYPE_CHECKING:
 
 # The pattern the renderer itself matches, restated rather than imported so
 # editing the module cannot silently redefine what the fidelity test counts.
-RAW_HTML_TAG = re.compile(r"<[A-Za-z!/][^>]*>")
+# The class carries the ``?`` that admits a processing instruction: while it did
+# not, the accounting property under-counted exactly the brackets this pattern
+# now consumes, and a mid-line ``<?php ?>`` stayed live through the public API.
+RAW_HTML_TAG = re.compile(r"<[A-Za-z!?/][^>]*>")
 
 # A consumer-faithful raw-HTML pattern, calibrated against a CommonMark parser
 # (``markdown-it-py``) over the corpus in
@@ -56,24 +59,41 @@ _HTML_BLOCK_NAMES = (
     r"|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li"
     r"|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search"
     r"|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-    r"|pre|script|style|textarea"
 )
+# The type-1 block names. CommonMark restricts their start condition to the
+# *opening* form, so ``</pre``, ``</script``, ``</style`` and ``</textarea`` are
+# inert at a line start while ``</div`` and ``</p`` are live; the parser
+# confirms both halves. Splitting them out is what lets the oracle model that
+# rule instead of recording the closing forms as a false positive. Keep this
+# list disjoint from ``_HTML_BLOCK_NAMES``, or a name would be counted twice.
+_TYPE_1_BLOCK_NAMES = r"pre|script|style|textarea"
+_TAG_END = r"(?=\s|/?>|$)"
+# Every block name in either form, then the type-1 names in their opening form
+# alone. The second branch is spelled separately rather than by a lookahead so a
+# reader can see which names carry the asymmetric rule.
+_TAG_START = (
+    rf"(?i:</?(?:{_HTML_BLOCK_NAMES}){_TAG_END})"
+    rf"|(?i:<(?:{_TYPE_1_BLOCK_NAMES}){_TAG_END})"
+)
+# Every opener the reader promotes to a block at a line start: a block tag name
+# matched case-insensitively, a comment, a processing instruction, a
+# declaration, or the literal CDATA opener.
 _LIVE_LINE_START = (
-    # A block tag name is matched case-insensitively, as the specification
-    # requires; ``<SCRIPT`` opens a block just as ``<script`` does.
-    rf"(?i:</?(?:{_HTML_BLOCK_NAMES})(?=\s|/?>|$))"
+    rf"(?:{_TAG_START})"
     r"|<!--"
     r"|<\?"
-    # A declaration needs an uppercase letter or the literal CDATA opener; the
-    # escaped form an earlier rule may produce is inert for a real parser.
+    # A declaration needs an uppercase letter. The bracket rule may already have
+    # escaped the '[' of a CDATA opener, so the escaped form is inert here.
     r"|<![A-Z]"
     r"|<!\[CDATA\["
 )
-# The prefix a reader may fold away before an HTML-block opener: up to three
-# spaces of indentation, then any run of blockquote and list markers. Three
-# facts bound the shape, and all three were established against a CommonMark
-# parser over the corpus in ``test_renderer_oracle_fidelity`` rather than from
-# memory.
+# Two prefixes, because the parser and the guard answer different questions.
+#
+# ``_PARSER_LINE_PREFIX`` is what a CommonMark reader folds away on the line that
+# *carries* the container markers: up to three spaces of indentation, then any
+# run of blockquote and list markers. Three facts bound the shape, and all three
+# were established against a parser over the corpus in
+# ``test_renderer_oracle_fidelity`` rather than from memory.
 #
 # First, a marker may itself be indented by up to three spaces. Second, a
 # blockquote marker may be followed by up to four whitespace characters and
@@ -89,16 +109,97 @@ _LIVE_LINE_START = (
 # bounded by four *columns*, and a tab is not one column but however many
 # advance it to the next four-column stop. A character-count pattern cannot
 # compute that, so a tab-heavy prefix such as ``-\\t\\t`` is reported live where
-# the reader sees indented code. The pattern stays sound -- it never misses a
-# block the reader opens -- and it is exact on text without tabs, which is the
-# domain the composition alphabet draws from.
-_LIVE_BLOCK_PREFIX = (
+# the reader sees indented code.
+_PARSER_LINE_PREFIX = (
     r" {0,3}"
     # Plain single braces: this fragment interpolates nothing, and the doubling
     # an f-string would need here is exactly the kind of hand-counted escaping
     # the surrounding comments are warning about.
     r"(?:(?:>[ \t]{0,4}|[-+*][ \t]{1,4}|[0-9]{1,9}[.)][ \t]{1,4}))*"
 )
+
+# The prefix the guard folds away, and it is deliberately far looser than the
+# parser's. A parser can fold only the markers it has just seen on this line; a
+# guard escaping one buffer at a time cannot recompute a continuation line's
+# content column, because that column depends on a container opened *earlier*
+# and survived by the reader across the blank line the renderer inserts between
+# blocks. Folding any interleaving of whitespace and markers is sound where
+# folding only three spaces of indent is not. The price is that a line the
+# reader treats as indented code is guarded too; that cost is measured and
+# documented in ``docs/comment-extraction-design.md`` rather than assumed away.
+_GUARD_PREFIX = r"(?:[ \t]|>|[-+*]|[0-9]{1,9}[.)])*"
+
+# A line that opens a blockquote or list container. CommonMark retains a
+# container across lines -- and across the blank line the renderer puts between
+# blocks -- so a *later* line can sit inside one while carrying no marker of its
+# own. That line's indentation is measured from the container's content column
+# rather than from the document margin, which is how eleven spaces can precede a
+# live opener where four spaces at the top level would be indented code.
+#
+# A marker counts whether or not whitespace separates it from its content: a
+# bare ``-`` on a line opens a list whose content column is two, so a following
+# line indented by four columns is inside that list rather than in code.
+_CONTAINER_LINE = re.compile(
+    r"(?:(?<=\n)|(?<=\r)|\A)"
+    r" {0,3}(?:>|[-+*](?=[ \t]|\r|\n|$)|[0-9]{1,9}[.)](?=[ \t]|\r|\n|$))"
+)
+
+# An opener on a line that continues a container opened earlier. Such a line
+# may carry nothing but indentation, or indentation interleaved with further
+# markers of its own: ``> 10. item`` followed by ``>     <script`` is a quote
+# continuing into a list whose content is a live block, and ``10. item``
+# followed by ``\t<script`` is a list item whose content column a tab reaches.
+#
+# Requiring the line to begin with whitespace was an earlier defect in this
+# oracle. It is the shape that looks right -- a continuation line is *indented*
+# -- but a nested container begins with a marker instead, so the assessment's
+# ``> 10. item`` / ``>     <script`` was reported inert while a parser opened a
+# block. Hence ``_GUARD_PREFIX`` rather than a leading whitespace run.
+_CONTINUATION_OPENER = re.compile(
+    rf"(?:(?<=\n)|(?<=\r)){_GUARD_PREFIX}(?=(?:{_LIVE_LINE_START}))<"
+)
+
+
+def live_raw_html(text: str) -> re.Match[str] | None:
+    """Return the first construct a CommonMark reader would treat as raw HTML.
+
+    This is the oracle's single entry point, and it applies the reader's rules
+    in the order a reader applies them. ``_LIVE_RAW_HTML_INLINE`` covers the
+    first three: a complete tag anywhere, a line-start opener behind the
+    indentation and container prefix the reader folds away *on that line*, and a
+    processing instruction or CDATA section wherever it appears. The fourth rule
+    -- an opener on a line continuing a container opened earlier -- is the one
+    the first three cannot see, because that line's indentation is measured from
+    the container's content column rather than from the document margin. It is
+    applied separately below rather than folded into the same pattern: doing so
+    needs an unbounded lookbehind for the container line, which would make the
+    match quadratic over a long buffer.
+
+    Nothing outside this module should reach for ``_LIVE_RAW_HTML_INLINE``. It
+    is the shape of the defect that motivated splitting the rules: an oracle
+    that judged only the per-line rules agreed with a renderer that had the same
+    blind spot, so the safety property passed while excluding nothing.
+
+    The continuation rule is deliberately conservative: once a container line
+    has appeared, any later guarded opener is reported live, even when
+    intervening unindented text has since closed the container and a parser
+    would see indented code -- ``- item`` followed by a blank line and
+    ``    <script`` is reported live where the parser reads indented code,
+    because the same shape with a surviving container is a real block and one
+    buffer cannot distinguish them. The approximation is bounded and points the
+    safe way -- it makes the safety property stricter than the reader, never
+    laxer -- and ``test_oracle_over_approximates_a_closed_container`` pins it so
+    it cannot silently become an unexamined claim.
+    """
+    match = _LIVE_RAW_HTML_INLINE.search(text)
+    if match is not None:
+        return match
+    container = _CONTAINER_LINE.search(text)
+    if container is None:
+        return None
+    return _CONTINUATION_OPENER.search(text, container.end())
+
+
 # An HTML block may be indented by up to three spaces, it may begin at the
 # start of any line rather than only at the start of the text, and a line ends
 # at a carriage return as well as a line feed. All three bounds were missed by
@@ -106,9 +207,11 @@ _LIVE_BLOCK_PREFIX = (
 # carriage-return-terminated, or container-wrapped opener as inert when a real
 # reader sees a block. Python's ``(?m:^)`` recognizes only the line feed, so the
 # anchor is spelled out here.
-LIVE_RAW_HTML = re.compile(
+#
+# This is a sub-rule of ``live_raw_html``, not the oracle. Use that instead.
+_LIVE_RAW_HTML_INLINE = re.compile(
     # A line-start opener, with or without a closing '>'.
-    rf"(?:(?<=\n)|(?<=\r)|\A){_LIVE_BLOCK_PREFIX}(?:{_LIVE_LINE_START})"
+    rf"(?:(?<=\n)|(?<=\r)|\A){_PARSER_LINE_PREFIX}(?:{_LIVE_LINE_START})"
     # A complete tag anywhere, which also ends any block the first rule found.
     rf"|{_LIVE_TAG}"
     rf"|<\?[\s\S]*?\?>"
@@ -123,12 +226,13 @@ LIVE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;)")
 # renderer's pattern, so dropping an opener from the implementation fails the
 # accounting property instead of redefining what the property counts.
 #
-# Every line is a candidate, and the prefix is the same one ``LIVE_RAW_HTML``
-# folds away: a reader reaches the opener through the container markers just as
-# it does through indentation. Python's ``(?m:^)`` recognizes only the line
-# feed, so the anchor is spelled out as it is above.
+# Every line is a candidate. The prefix is ``_GUARD_PREFIX`` rather than the
+# parser's, because this constant restates the *guard*, and the guard folds away
+# any interleaving of whitespace and markers so that a continuation line it
+# cannot recompute statically is still covered. Python's ``(?m:^)`` recognizes
+# only the line feed, so the anchor is spelled out as it is above.
 LIVE_BLOCK_OPENER = re.compile(
-    rf"(?:(?<=\n)|(?<=\r)|\A){_LIVE_BLOCK_PREFIX}(?=(?:{_LIVE_LINE_START}))<"
+    rf"(?:(?<=\n)|(?<=\r)|\A){_GUARD_PREFIX}(?=(?:{_LIVE_LINE_START}))<"
 )
 
 
@@ -257,7 +361,7 @@ def first_live_construct(
     prose and a reference may not. Raw HTML and Markdown brackets are unsafe in
     all three.
     """
-    match = LIVE_RAW_HTML.search(chunk)
+    match = live_raw_html(chunk)
     if match is not None:
         return f"live raw HTML tag in {kind}: {match.group()!r}"
     if has_active_bracket(chunk):
@@ -347,27 +451,28 @@ def apply_missing_backslash_rule(monkeypatch: pytest.MonkeyPatch) -> None:
 # position zero and case-sensitive, so an indented, uppercase, or
 # post-line-break opener slipped past it. Reproduced here so the oracle's
 # sensitivity to that defect is committed rather than reported.
-def leading_only_html_block_opener(text: str) -> str:
-    """Entity-escape an opener only when it starts the whole string."""
-    if RAW_HTML_TAG.match(text) is None and _LEADING_ONLY_OPENER.match(text):
-        return "&lt;" + text[1:]
-    return text
-
-
 _LEADING_ONLY_OPENER = re.compile(
     r"^(?:"
     r"<!--"
     r"|<\?"
     r"|<!(?:[A-Z]|\\\[|\[CDATA\[)"
+    # The original list, case-sensitively and with all names in one set.
     r"|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center"
     r"|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure"
     r"|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend"
     r"|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param"
     r"|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-    r"|pre|script|style|textarea)"
+    rf"|{_TYPE_1_BLOCK_NAMES})"
     r"(?=\s|/?>|$)"
     r")"
 )
+
+
+def leading_only_html_block_opener(text: str) -> str:
+    """Entity-escape an opener only when it starts the whole string."""
+    if RAW_HTML_TAG.match(text) is None and _LEADING_ONLY_OPENER.match(text):
+        return "&lt;" + text[1:]
+    return text
 
 
 def apply_leading_only_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -389,12 +494,18 @@ def apply_leading_only_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> None
 # This is the defect the shared oracle once shared, which is why the oracle had
 # to be repaired in the same change. Reproducing the old shape here keeps the
 # oracle's sensitivity to it committed rather than reported.
+#
+# The tag alternation restates the original guard's name list, which carried all
+# block names in one set because the guard did not model the type-1 asymmetry
+# either. Any name that reaches the mutation is enough to exercise it, so the
+# set is spelled from the live start condition rather than the oracle's current
+# split.
 _PRE_REPAIR_OPENER = (
     r"(?:"
     r"<!--"
     r"|<\?"
     r"|<!(?:[A-Z]|\\\[|\[CDATA\[)"
-    rf"|(?i:</?(?:{_HTML_BLOCK_NAMES})(?=\s|/?>|$))"
+    rf"|(?i:{_TAG_START})"
     r")"
 )
 LF_ONLY_INDENT_GUARD = re.compile(
@@ -414,3 +525,70 @@ def apply_lf_only_indent_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         renderer, "_neutralize_html_block_openers", lf_only_indent_html_block_opener
     )
+
+
+# The guard as it stood before the container-continuation repair. It had the
+# right anchor -- every line start, both line endings -- and it folded away
+# containers *on the line that carries the marker*, using the specifications's
+# column bounds (three spaces of indent; four whitespace characters after a
+# blockquote marker; one to four after a list marker).
+#
+# What it could not do is follow a container onto a *later* line. CommonMark
+# retains a container across lines and across a blank line, so a continuation
+# line needs no marker of its own and its indentation is measured from the
+# container's content column rather than from the document margin. A stateless
+# per-line prefix cannot recover that column, which is how
+# ``"10. item\n    <script"`` and ``"> 10. item\n>     <script"`` both stayed
+# live while every marker-carrying line was guarded.
+#
+# The prefix is reproduced exactly as shipped, tab bound included, so the
+# mutation reintroduces the real defect rather than an approximation of it.
+_COLUMN_BOUND_PREFIX = (
+    r" {0,3}(?:(?:>[ \t]{0,4}|[-+*][ \t]{1,4}|[0-9]{1,9}[.)][ \t]{1,4}))*"
+)
+GENERATION_3_OPENER = re.compile(
+    rf"(?:(?<=\n)|(?<=\r)|\A)(?P<prefix>{_COLUMN_BOUND_PREFIX})"
+    rf"(?=(?:{_LIVE_LINE_START}))(?P<bracket><)"
+)
+
+
+def generation_3_html_block_opener(text: str) -> str:
+    """Entity-escape an opener only on the line that carries its container."""
+    return GENERATION_3_OPENER.sub(r"\g<prefix>&lt;", text)
+
+
+def apply_generation_3_html_block_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the pre-repair guard: column-bounded, per-line, stateless."""
+    from docx_comment_extractor import renderer
+
+    monkeypatch.setattr(
+        renderer, "_neutralize_html_block_openers", generation_3_html_block_opener
+    )
+
+
+# The raw-HTML pattern as it stood before the processing-instruction repair. Its
+# first character class held letters, ``!`` and ``/``, so a processing
+# instruction beginning ``<?`` never reached it. At a line start the block-opener
+# guard still caught one, which is why the gap only showed mid-line: a fragment
+# reading ``"a <?php ?>"`` escaped to itself and a reader saw ``html_inline``.
+_GENERATION_3_RAW_HTML = re.compile(r"<(?P<content>[A-Za-z!/][^>]*)>")
+
+
+def generation_3_raw_html(text: str) -> str:
+    """Escape complete tags, missing the processing instruction as it once did."""
+    escaped = text
+    for source, replacement in (
+        ("\\", "\\\\"),
+        ("&", "&amp;"),
+        ("[", r"\["),
+        ("]", r"\]"),
+    ):
+        escaped = escaped.replace(source, replacement)
+    return _GENERATION_3_RAW_HTML.sub(r"&lt;\g<content>&gt;", escaped)
+
+
+def apply_generation_3_raw_html_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the pre-repair raw-HTML pattern, which omitted ``?``."""
+    from docx_comment_extractor import renderer
+
+    monkeypatch.setattr(renderer, "RAW_HTML_PATTERN", _GENERATION_3_RAW_HTML)

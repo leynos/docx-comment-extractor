@@ -40,7 +40,6 @@ from hypothesis import strategies as st
 from docx_comment_extractor.models import Block, Comment, DocumentModel, Fragment
 from docx_comment_extractor.renderer import escape_criticmarkup_text, render_document
 from tests.support_renderer_oracles import (
-    LIVE_RAW_HTML,
     RANGE_MARKERS,
     RAW_HTML_TAG,
     active_delimiter_count,
@@ -48,6 +47,7 @@ from tests.support_renderer_oracles import (
     consumed_spans,
     guarded_opener_count,
     has_active_bracket,
+    live_raw_html,
 )
 
 if typ.TYPE_CHECKING:
@@ -162,6 +162,18 @@ OPENER_SAMPLES = (
     "<!DOCTYPE",
     "<![CDATA[",
     "a <script",
+    # Whole openers for the continuation shapes a per-line guard cannot follow:
+    # the container opens on the first line and the opener arrives on a later
+    # one. Composed from single characters these are far longer than the
+    # fragment budget, so without them the property never draws the shape the
+    # container-continuation repair exists for.
+    "10. item\n    <script",
+    "> 10. item\n>     <script",
+    "- outer\n  - inner\n    <script",
+    "10. item\r    <!--",
+    # A processing instruction that is live *mid-line*, where the block-opener
+    # guard does not reach and the raw-HTML pattern has to cover it.
+    "a <?php ?>",
 )
 
 # Composition text is drawn from the reactive characters themselves, so that
@@ -170,12 +182,17 @@ OPENER_SAMPLES = (
 # ``"\n"`` and leaves a real line start behind, which is where CommonMark
 # promotes an unmatched HTML-block opener into a block that swallows the
 # renderer's own markers. The letters are the ones that spell a block tag name.
-COMPOSITION_CHARACTERS = "<>[](){}=+~-\\/!&\nabcdeilnoprstuvxyz"
+#
+# The ``?`` is what lets the generator reach a processing instruction. Without
+# it the alphabet could not build ``<?`` at all, which is how a live mid-line
+# ``<?php ?>`` survived the composition property: the character was absent, so
+# no draw could ever contain the construct.
+COMPOSITION_CHARACTERS = "<>[](){}=+~-\\/!?&\nabcdeilnoprstuvxyz"
 
 
 def _assert_no_live_construct(escaped: str) -> None:
     """Fail if a Markdown or CriticMarkup consumer could act on ``escaped``."""
-    match = LIVE_RAW_HTML.search(escaped)
+    match = live_raw_html(escaped)
     assert match is None, (
         f"a raw HTML tag survived escaping: {match and match.group()!r}"
     )
