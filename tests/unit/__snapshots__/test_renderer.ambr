@@ -1,0 +1,11 @@
+# serializer version: 1
+# name: test_render_document_snapshot_for_criticmarkup_literals
+  '{==Literal \\{==marker==\\} text==}{>>Escaper, 2026-04-09T20:35:31Z: Avoid \\{>>raw<<\\} delimiters.<<}'
+# ---
+# name: test_render_document_snapshot_for_cross_paragraph_comment
+  '''
+  The first paragraph opens {==a long comment
+  
+  that closes here==}{>>Jordan, 2026-04-09T20:35:31Z: This crosses a paragraph boundary. / Second note paragraph.<<} with more context.
+  '''
+# ---
