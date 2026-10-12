@@ -100,12 +100,14 @@ start and end markers rather than a general overlap graph.
   container state across a line break and across a blank line, and a
   continuation line's indentation is measured from the container's content
   column rather than from the document margin, so `10. item\n    <script` is a
-  list item holding indented code — and an opener — for the reader, while a
-  guard inspecting that line alone sees four spaces and nothing more. A marker
-  may also lead the continuation line itself, as in `10. item\n    > <!--`.
-  Because `render_document` joins blocks with a blank line and the reader
-  retains the container across it, a container opened in one block can govern
-  the next, so the guard cannot treat a buffer in isolation.
+  list item holding an HTML block on its continuation line — verified against a
+  parser, which returns `list_item_open`, `paragraph_open`, then `html_block` —
+  while a guard inspecting that line alone sees four spaces and nothing more. A
+  marker may also lead the continuation line itself, as in
+  `10. item\n    > <!--`. Because `render_document` joins blocks with a blank
+  line and the reader retains the container across it, a container opened in
+  one block can govern the next, so the guard cannot treat a buffer in
+  isolation.
 
   The container prefix and the rest of the opener are preserved, and the same
   prefixes mid-line stay untouched, because escaping them would be a visible
@@ -137,13 +139,17 @@ start and end markers rather than a general overlap graph.
   The cost is visible rather than invisible, and the earlier claim that a code
   block is unaffected was wrong. A parser reads four-space-indented `<script`
   as indented code; the guard still escapes the bracket, and CommonMark decodes
-  an entity in prose but not inside a code span or code block, so the reader
-  sees `&amp;lt;script` where the unguarded form rendered `&lt;script`. Over a
-  corpus of 2919 container-and-opener rows, 1204 differed at the text level and
-  943 of those differed in the rendered HTML a reader would see: 847 involving
-  a code block and 96 prose only. That is the price of the only per-buffer rule
-  that reaches the continuation shapes. It errs towards escaping: a spurious
-  entity is visible and bounded, while a missed opener is a swallowed document.
+  an entity in prose but not inside a code span or code block. The change is
+  therefore visible to the reader of the rendered page: where the text used to
+  display as the literal `<script`, it now displays as the literal
+  `&lt;script`. Those two are the *displayed* forms; the serialized HTML that
+  produces them is `<pre><code>&lt;script` and `<pre><code>&amp;lt;script`
+  respectively. Over a corpus of 2919 container-and-opener rows, 1204 differed
+  at the text level and 943 of those differed in the rendered HTML a reader
+  would see: 847 involving a code block and 96 prose only. That is the price of
+  the only per-buffer rule that reaches the continuation shapes. It errs
+  towards escaping: a spurious entity is visible and bounded, while a missed
+  opener is a swallowed document.
 
 ## Unsupported content
 

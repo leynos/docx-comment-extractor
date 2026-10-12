@@ -161,7 +161,7 @@ _CONTINUATION_OPENER = re.compile(
 
 
 def live_raw_html(text: str) -> re.Match[str] | None:
-    """Return the first construct a CommonMark reader would treat as raw HTML.
+    r"""Return the first construct a CommonMark reader would treat as raw HTML.
 
     This is the oracle's single entry point, and it applies the reader's rules
     in the order a reader applies them. ``_LIVE_RAW_HTML_INLINE`` covers the
@@ -183,13 +183,18 @@ def live_raw_html(text: str) -> re.Match[str] | None:
     The continuation rule is deliberately conservative: once a container line
     has appeared, any later guarded opener is reported live, even when
     intervening unindented text has since closed the container and a parser
-    would see indented code -- ``- item`` followed by a blank line and
-    ``    <script`` is reported live where the parser reads indented code,
-    because the same shape with a surviving container is a real block and one
-    buffer cannot distinguish them. The approximation is bounded and points the
-    safe way -- it makes the safety property stricter than the reader, never
-    laxer -- and ``test_oracle_over_approximates_a_closed_container`` pins it so
-    it cannot silently become an unexamined claim.
+    would see an ordinary paragraph or indented code. The shapes that actually
+    over-approximate are the ones with intervening unindented text -- for
+    example ``- item\n\nfoo\n    <script`` and ``> quote\n\nfoo\n    <script``,
+    which the parser reads as prose while this reports an opener -- because the
+    same shape with a *surviving* container is a real block and one buffer
+    cannot distinguish them. Note that ``- item\n\n    <script`` is **not** such
+    a shape: the container does survive the blank line, and the parser returns
+    an ``html_block``, so oracle and parser agree there. The approximation is
+    bounded and points the safe way -- it makes the safety property stricter
+    than the reader, never laxer -- and
+    ``test_oracle_over_approximates_a_closed_container`` pins it against the
+    parser so it cannot silently become an unexamined claim.
     """
     match = _LIVE_RAW_HTML_INLINE.search(text)
     if match is not None:

@@ -113,12 +113,14 @@ neutralized before rendering, so untrusted content remains literal text.
 The escape is deliberately wider than a Markdown parser's own rules for one
 case. Text that could begin an HTML block — an unclosed `<script`, or a tag or
 comment reached through a list or blockquote marker — is escaped even where the
-parser would have treated it as ordinary indented code. A reader of the
-rendered Markdown sees `&amp;lt;script` where the unescaped text would have
-shown `&lt;script`, because an entity is not decoded inside a code block. This
-affects text that was already indented as code and contains a `<`; it is a
-visible change, and it is preferred to the alternative, where a missed opener
-swallows the rest of the document.
+parser would have treated it as ordinary indented code. This affects text that
+was already indented as code and contains a `<`, and the change is visible in
+the rendered page: a code block that used to display the literal `<script` now
+displays the literal `&lt;script`, because an entity is not decoded inside a
+code block. (Those are the displayed forms; the serialized HTML is
+`<pre><code>&amp;lt;script` rather than `<pre><code>&lt;script`.) The change is
+preferred to the alternative, where a missed opener swallows the rest of the
+document.
 
 Comment metadata follows these rules:
 

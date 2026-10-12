@@ -550,3 +550,42 @@ def test_oracle_shares_the_line_start_condition_it_claims_to_judge() -> None:
         assert live_raw_html(text) is not None, (
             f"the oracle treats the live opener {text!r} as inert"
         )
+
+
+# Shapes where the continuation rule reports an opener the parser does not see.
+# Each has unindented text after the container line, which ends the container
+# before the opener arrives; a buffer-at-a-time rule cannot observe that, so it
+# reports live. The over-approximation is the safe direction -- the property
+# stays stricter than the reader -- but it is a deliberate approximation and
+# this is what pins it. Deliberately excluded: shapes where the container
+# *does* survive the blank line -- ``- item``, a blank line, then ``    <script``
+# -- because the parser returns a real ``html_block`` there and oracle and
+# parser agree.
+OVER_APPROXIMATION_CASES: tuple[str, ...] = (
+    "- item\n\nfoo\n    <script",
+    "- item\n\nfoo\n\n    <script",
+    "> quote\n\nfoo\n    <script",
+    "- item\n\n\nfoo\n\n    <script",
+)
+
+
+def test_oracle_over_approximates_a_closed_container() -> None:
+    """The continuation rule over-approximates, and only in the safe direction.
+
+    Once a container line has appeared, a later guarded opener is reported live
+    even when intervening unindented text has since closed the container. This
+    asserts both halves of that claim against a real parser: the parser sees no
+    raw HTML, so the oracle *is* over-approximating, and the oracle still
+    reports live, so the direction is the safe one. Without this the docstring's
+    approximation claim would be unexamined prose.
+    """
+    markdown = MarkdownIt("commonmark")
+    for text in OVER_APPROXIMATION_CASES:
+        parser_verdict = bool(_live_html_tokens(markdown, text))
+        assert not parser_verdict, (
+            f"this case is not an over-approximation -- the parser sees raw "
+            f"HTML in {text!r}, so it belongs in the calibration corpus instead"
+        )
+        assert live_raw_html(text) is not None, (
+            f"the oracle failed to report the opener in {text!r}"
+        )
