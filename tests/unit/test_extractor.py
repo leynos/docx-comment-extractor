@@ -104,6 +104,7 @@ def test_extract_document_wraps_corrupt_package_failures(
     loaded_paths: list[Path] = []
 
     def fail_to_load(path: Path) -> typ.NoReturn:
+        """Record the path, then raise the parametrised package failure."""
         loaded_paths.append(path)
         raise failure_factory()
 
@@ -143,6 +144,7 @@ def test_extract_document_rejects_oversized_packages(
     monkeypatch.setattr(extractor, "MAX_INPUT_BYTES", 1)
 
     def fail_if_loaded(path: Path) -> typ.NoReturn:
+        """Fail the test if the loader is reached."""
         del path
         pytest.fail("oversized packages should be rejected before loader invocation")
 
@@ -178,6 +180,7 @@ def test_extract_document_rejects_zip_resource_limits(
     monkeypatch.setattr(extractor, limit_name, limit_value)
 
     def fail_if_loaded(path: Path) -> typ.NoReturn:
+        """Fail the test if the loader is reached."""
         del path
         pytest.fail("resource-limit failures should occur before package loading")
 
