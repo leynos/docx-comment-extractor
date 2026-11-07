@@ -104,7 +104,7 @@ def test_extract_document_wraps_corrupt_package_failures(
     loaded_paths: list[Path] = []
 
     def fail_to_load(path: Path) -> typ.NoReturn:
-        """Record the path, then raise the parametrised package failure."""
+        """Record the path, then raise the parametrized package failure."""
         loaded_paths.append(path)
         raise failure_factory()
 
