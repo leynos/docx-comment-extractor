@@ -220,6 +220,7 @@ def _command_bound_to(
             ),
         ] = False,
     ) -> None:
+        """Configure the opt-in log sink, then run the extraction with the bundle."""
         _install_log_sink(enabled=verbose, console=dependencies.stderr_console)
         _run_extraction(input_docx, output, dependencies=dependencies)
 

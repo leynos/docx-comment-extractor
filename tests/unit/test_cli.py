@@ -63,6 +63,7 @@ def test_extract_comments_rejects_output_alias_before_extraction(
     output_path = _build_output_alias(input_path, tmp_path, alias_kind)
 
     def fail_if_extracted(_path: Path) -> typ.NoReturn:
+        """Fail the test if extraction starts."""
         pytest.fail("output alias validation must run before extraction")
 
     monkeypatch.setattr(cli, "extract_document", fail_if_extracted)
@@ -121,6 +122,7 @@ def test_write_output_removes_temp_when_writing_fails(
         name = str(temporary_path)
 
         def __enter__(self) -> FailingTemporaryFile:
+            """Create the named temporary file and return this stand-in."""
             temporary_path.touch()
             return self
 
@@ -130,7 +132,7 @@ def test_write_output_removes_temp_when_writing_fails(
             _exception: object,
             _traceback: object,
         ) -> None:
-            return None
+            """Leave the temporary file in place and propagate any exception."""
 
         @staticmethod
         def write(_markdown: str) -> typ.NoReturn:
@@ -171,6 +173,7 @@ def test_validate_input_path_wraps_filesystem_failures(tmp_path: Path) -> None:
     input_path.touch()
 
     def fail_to_measure(_path: Path) -> typ.NoReturn:
+        """Raise the OSError a failed stat call would."""
         message = "stat failed"
         raise OSError(message)
 
@@ -184,6 +187,7 @@ def test_validate_output_path_wraps_filesystem_failures(tmp_path: Path) -> None:
     output_path = tmp_path / "output.md"
 
     def fail_to_compare(_input: Path, _output: Path) -> typ.NoReturn:
+        """Raise the OSError a failed samefile call would."""
         message = "samefile failed"
         raise OSError(message)
 
@@ -283,6 +287,7 @@ def _fixed_ticks_clock(ticks: tuple[float, ...]) -> typ.Callable[[], float]:
     """Return a clock that yields ``ticks`` in order and then fails loudly."""
 
     def clock() -> float:
+        """Return the next tick, failing the test once none remain."""
         try:
             return remaining.pop(0)
         except IndexError:
