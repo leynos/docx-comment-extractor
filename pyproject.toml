@@ -17,7 +17,7 @@ docx-comment-extractor = "docx_comment_extractor.cli:main"
 [dependency-groups]
 dev = [
     "pytest",
-    "ruff==0.17.3",
+    "ruff==0.17.4",
     "pyright",
     "pytest-timeout",
     "pytest-xdist",
