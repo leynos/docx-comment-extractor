@@ -216,7 +216,7 @@ def test_oracle_rejects_every_escaping_residue() -> None:
     """Escaped output should contain no raw HTML a parser would recognize.
 
     This is the end-to-end form of the calibration: it takes real escaping
-    output rather than hand-written snippets, so it also covers whatever the
+    output rather than handwritten snippets, so it also covers whatever the
     escape table does to a tag that straddles the raw-HTML pattern.
     """
     from docx_comment_extractor.renderer import escape_criticmarkup_text
