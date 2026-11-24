@@ -36,11 +36,9 @@ unit, behavioural, and snapshot tests. `lxml-stubs` provides XML typing for
 static analysis. Ruff provides linting and formatting, whilst the
 repository-managed `ty` tool provides static type checking.
 
-The `scripts/` directory holds the shared spelling-policy helper, whose modules
-import each other by flat top-level name. Both the
-`[tool.ty.environment] extra-paths = ["scripts"]` stanza in `pyproject.toml`
-and the `--extra-search-path scripts` flag in `make typecheck` put that
-directory on ty's module search path so those imports resolve.
+Spelling is enforced by the shared `typos-config-builder gate`, which
+`make spelling` runs at the release pinned in the `Makefile`; the repository
+carries no spelling scripts of its own.
 
 ## Command flow
 
