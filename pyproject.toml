@@ -37,8 +37,6 @@ dev = [
 [tool.ruff]
 line-length = 88
 preview = true
-# The estate spelling helper has its own Python 3.13 Ruff gate in the Makefile.
-extend-exclude = ["scripts"]
 
 [tool.ruff.lint]
 select = [
@@ -142,9 +140,6 @@ timeout = 30
 
 [tool.uv]
 package = true
-
-[tool.ty.environment]
-extra-paths = ["scripts"]
 
 
 [build-system]

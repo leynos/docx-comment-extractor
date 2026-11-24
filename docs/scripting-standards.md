@@ -536,34 +536,21 @@ duplicate key is refused rather than silently resolved.
 
 ## Operational guidelines
 
-### Shared spelling policy helper
+### Shared spelling policy
 
-`make all` and `make markdownlint` enforce en-GB-oxendict spelling using the
-`TYPOS_VERSION` pin in the `Makefile`. The gate tests the policy helper,
-refreshes the shared base dictionary, generates `typos.toml`, and scans tracked
-Markdown files.
-
-The application targets Python 3.14, while the shared helper retains a Python
-3.13 compatibility contract for the wider estate. Project Ruff therefore uses
-the `RUFF_VERSION` pin in the `Makefile` and excludes `scripts/`;
-`spelling-helper-test` applies its separately pinned, isolated Ruff format and
-lint checks with `--target-version py313` before running the helper tests under
-Python 3.13. The project development dependency uses the same project Ruff
-version so direct `uv run ruff` invocations do not drift from the Make gates.
+`make all` and `make markdownlint` enforce en-GB-oxendict spelling by running
+the pinned `typos-config-builder gate` (`TYPOS_CONFIG_BUILDER_VERSION` in the
+`Makefile`). The gate refreshes the shared base dictionary, generates
+`typos.toml`, scans tracked Markdown files and enforces the shared phrase
+corrections.
 
 The shared dictionary is maintained in `leynos/agent-helper-scripts`. Its
-repository-local cache and freshness metadata are untracked. The helper
-replaces the cache only when the authoritative copy is newer and can reuse a
-valid cached copy while offline. A clean checkout with an unavailable network
-retains the reviewed, tracked `typos.toml` policy.
+repository-local cache and freshness metadata are untracked. A clean checkout
+with an unavailable network retains the reviewed, tracked `typos.toml` policy.
 
 Do not edit generated entries in `typos.toml`. Put only repository-specific
 proper nouns, quoted upstream titles, fixtures, stems or exclusions in
-`typos.local.toml`, then regenerate with:
-
-```bash
-uv run scripts/generate_typos_config.py
-```
+`typos.local.toml`, then regenerate with `make spelling`.
 
 Keep upstream API spellings in inline or fenced code where practical. The
 spelling gate deliberately ignores code spans and fenced code blocks.
