@@ -61,6 +61,8 @@ jobs:
         with:
           globs: '**/*.md'
 
+      - name: Install the YAML lint tools
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@ab6505246c6b043b742a225e428e00448c0a37af
       - name: Run ruff
         run: make lint
 
